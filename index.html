@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>All-Time Clutch — HoopsMatic</title>
+<meta name="description" content="NBA clutch-time leaderboard since 1996-97. Final 5 minutes, margin within 5. Filter by playoffs/regular season, season range, and qualifying attempts.">
+
+<!-- Tailwind via CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- pako for client-side gzip decode (data file is .csv.gz) -->
+<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Fraunces:opsz,wght@9..144,400;9..144,600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg:        #0e0d0b;
+    --bg-2:      #16140f;
+    --bg-3:      #1d1a13;
+    --border:    #2a261d;
+    --ink:       #ece6d8;
+    --ink-mute:  #8c8576;
+    --ink-dim:   #5a5648;
+    --accent:    #ff5a1f;   /* scoreboard orange */
+    --accent-2:  #ffbe55;   /* highlight gold */
+    --good:      #6dd58c;
+    --bad:       #d56d6d;
+  }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font-family: 'Fraunces', Georgia, serif;
+    font-feature-settings: "ss01" on, "ss02" on;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(255,90,31,0.06), transparent 60%),
+      radial-gradient(900px 500px at -10% 30%, rgba(255,190,85,0.04), transparent 60%),
+      var(--bg);
+  }
+  .display { font-family: 'Bebas Neue', 'Arial Narrow', sans-serif; letter-spacing: 0.02em; }
+  .mono    { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+  /* table */
+  .grid-row { display: grid; align-items: center; }
+  .grid-row > * { padding: 8px 10px; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .col-rank   { width: 44px; text-align: right; color: var(--ink-dim); }
+  .head { color: var(--ink-mute); font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.08em; font-size: 12px; }
+  .head .sort-arrow { color: var(--accent); }
+
+  /* zebra */
+  .row-body:nth-child(even) { background: rgba(255,255,255,0.012); }
+  .row-body:hover { background: rgba(255,90,31,0.06); }
+  .row-body.top10 { background: linear-gradient(90deg, rgba(255,90,31,0.10), transparent 60%); }
+
+  /* sort active column */
+  .col-active { color: var(--accent-2); }
+
+  /* range slider styling - keep subtle */
+  input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    width: 100%;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    background: var(--border);
+    height: 2px;
+  }
+  input[type=range]::-moz-range-track { background: var(--border); height: 2px; }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 16px; width: 16px;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    border-radius: 50%;
+    margin-top: -7px;
+    box-shadow: 0 0 0 1px var(--accent);
+    cursor: pointer;
+  }
+  input[type=range]::-moz-range-thumb {
+    height: 14px; width: 14px;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  /* phase pills */
+  .pill {
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    color: var(--ink-mute);
+    font-family: 'Bebas Neue', sans-serif;
+    letter-spacing: 0.10em;
+    font-size: 13px;
+    padding: 6px 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .pill:hover { color: var(--ink); border-color: var(--ink-dim); }
+  .pill.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #1a0e08;
+  }
+
+  /* sort buttons in column headers */
+  .sortbtn {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    letter-spacing: inherit;
+    padding: 0;
+    text-transform: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .sortbtn:hover { color: var(--ink); }
+  .sortbtn.active { color: var(--accent-2); }
+
+  /* loader */
+  .loader {
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    width: 28px; height: 28px;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* decorative scoreboard ticker line */
+  .tape {
+    background:
+      repeating-linear-gradient(90deg,
+        var(--border) 0 4px, transparent 4px 8px);
+    height: 2px; opacity: 0.6;
+  }
+
+  /* min-attempts input */
+  .num-input {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    padding: 6px 10px;
+    width: 80px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+  }
+  .num-input:focus { outline: none; border-color: var(--accent); }
+
+  /* mobile */
+  @media (max-width: 720px) {
+    .grid-row > .col-hide-sm { display: none; }
+  }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="max-w-6xl mx-auto px-5 sm:px-8 py-10">
+
+  <!-- masthead -->
+  <header class="mb-8">
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div>
+        <div class="text-xs mono tracking-[0.3em] text-[color:var(--accent)] uppercase mb-2">HoopsMatic · Tool</div>
+        <h1 class="display text-5xl sm:text-7xl leading-none">
+          All-Time Clutch
+        </h1>
+        <p class="mt-3 text-[color:var(--ink-mute)] max-w-2xl">
+          Career splits in the final five minutes of Q4 or any overtime, margin within five.
+          Every play-by-play event since the 1996&ndash;97 season, attributed to the player who took it.
+        </p>
+      </div>
+      <div class="text-right text-xs mono text-[color:var(--ink-dim)] mt-2">
+        <div>SOURCE · stats.nba.com PBP</div>
+        <div>ARCHIVE · shufinskiy/nba_data</div>
+      </div>
+    </div>
+    <div class="tape mt-6"></div>
+  </header>
+
+  <!-- controls -->
+  <section class="mb-6 grid gap-5 sm:grid-cols-3">
+    <div>
+      <div class="head mb-2">PHASE</div>
+      <div class="flex gap-2 flex-wrap">
+        <button class="pill on" data-phase="ALL">All</button>
+        <button class="pill" data-phase="RS">Regular Season</button>
+        <button class="pill" data-phase="PO">Playoffs</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="head mb-2 flex justify-between">
+        <span>SEASON RANGE</span>
+        <span id="season-range-label" class="text-[color:var(--ink)] mono"></span>
+      </div>
+      <div class="flex items-center gap-3">
+        <input type="range" id="season-from" />
+        <span class="mono text-xs text-[color:var(--ink-mute)]">to</span>
+        <input type="range" id="season-to" />
+      </div>
+    </div>
+
+    <div>
+      <div class="head mb-2">MINIMUM CLUTCH FGA (career, within filter)</div>
+      <div class="flex items-center gap-3">
+        <input type="number" id="min-fga" class="num-input" value="100" min="0" step="10" />
+        <span class="text-xs text-[color:var(--ink-mute)]">attempts</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="tape mb-2"></div>
+
+  <!-- summary line -->
+  <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+    <div class="display text-2xl text-[color:var(--ink)]">
+      Leaderboard
+      <span id="result-count" class="text-[color:var(--ink-mute)] text-base align-middle ml-2"></span>
+    </div>
+    <div class="text-xs mono text-[color:var(--ink-dim)]">Sort by clicking a column. Default: PPG.</div>
+  </div>
+
+  <!-- table -->
+  <div id="table" class="border border-[color:var(--border)] bg-[color:var(--bg-2)]">
+    <!-- header row -->
+    <div id="head-row" class="grid-row head"
+         style="grid-template-columns: 44px 1.8fr 80px 60px 70px 70px 70px 70px 70px 70px 70px;">
+      <div class="col-rank">#</div>
+      <div><button class="sortbtn" data-sort="name">Player</button></div>
+      <div><button class="sortbtn" data-sort="team">Team</button></div>
+      <div class="num col-hide-sm"><button class="sortbtn" data-sort="games">GP</button></div>
+      <div class="num"><button class="sortbtn active" data-sort="ppg">PPG</button></div>
+      <div class="num col-hide-sm"><button class="sortbtn" data-sort="pts">PTS</button></div>
+      <div class="num"><button class="sortbtn" data-sort="fga">FGA</button></div>
+      <div class="num"><button class="sortbtn" data-sort="fgpct">FG%</button></div>
+      <div class="num col-hide-sm"><button class="sortbtn" data-sort="fg3pct">3P%</button></div>
+      <div class="num"><button class="sortbtn" data-sort="efg">eFG%</button></div>
+      <div class="num col-hide-sm"><button class="sortbtn" data-sort="usg">USG%</button></div>
+    </div>
+    <div id="body">
+      <div class="p-10 flex items-center gap-4 text-[color:var(--ink-mute)]">
+        <div class="loader"></div>
+        <div class="mono text-sm">Loading clutch_splits.csv.gz …</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- methodology / footer -->
+  <section class="mt-10 grid gap-6 sm:grid-cols-2 text-sm text-[color:var(--ink-mute)]">
+    <div>
+      <div class="head mb-2">METHODOLOGY</div>
+      <p>
+        A clutch event is any play with <strong>≥ 4th quarter</strong> and
+        <strong>≤ 5:00 remaining</strong> in that period, while the
+        <strong>absolute score margin is ≤ 5</strong>. Score margin carries forward
+        between scoring plays. All overtime minutes qualify (margin filter still applies).
+        PPG = clutch points / clutch games (games in which the player had at least one
+        clutch shot, FT, or turnover).
+      </p>
+    </div>
+    <div>
+      <div class="head mb-2">USAGE NOTE</div>
+      <p>
+        USG% here is a <em>team-share proxy</em>: a player&rsquo;s clutch
+        (FGA + 0.44·FTA + TOV) divided by the average team clutch total within the
+        same filter. True usage rate requires on-court reconstruction and is a
+        later upgrade.
+      </p>
+    </div>
+  </section>
+
+  <div class="tape my-8"></div>
+
+  <footer class="text-xs mono text-[color:var(--ink-dim)] flex flex-wrap justify-between gap-3">
+    <div>HoopsMatic · All-Time Clutch · v1</div>
+    <div id="data-meta"></div>
+  </footer>
+</div>
+
+<script>
+// ----------- data load -----------
+const DATA_PATH = "clutch_splits.csv.gz";
+const state = {
+  rows: [],           // PLAYER rows
+  teamRows: [],       // TEAM rows
+  seasons: [],
+  phase: "ALL",       // ALL | RS | PO
+  seasonFrom: null,
+  seasonTo: null,
+  minFga: 100,
+  sortKey: "ppg",
+  sortDir: -1,        // -1 = desc
+};
+
+async function load() {
+  const r = await fetch(DATA_PATH);
+  if (!r.ok) throw new Error("data fetch failed: " + r.status);
+  const buf = new Uint8Array(await r.arrayBuffer());
+  const text = pako.inflate(buf, { to: "string" });
+  parseCsv(text);
+  initControls();
+  render();
+}
+
+function parseCsv(text) {
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  const head = lines[0].split(",");
+  const idx = Object.fromEntries(head.map((h, i) => [h, i]));
+  const seasonsSet = new Set();
+  for (let i = 1; i < lines.length; i++) {
+    // CSV without quoted commas in this dataset, but be safe
+    const cols = splitCsv(lines[i]);
+    if (cols.length < head.length) continue;
+    const rec = {
+      rowType: cols[idx.ROW_TYPE],
+      playerId: cols[idx.PLAYER_ID],
+      name: cols[idx.PLAYER_NAME],
+      team: cols[idx.TEAM],
+      season: cols[idx.SEASON],
+      phase: cols[idx.PHASE],
+      games: +cols[idx.GAMES] || 0,
+      fgm: +cols[idx.FGM] || 0,
+      fga: +cols[idx.FGA] || 0,
+      fg3m: +cols[idx.FG3M] || 0,
+      fg3a: +cols[idx.FG3A] || 0,
+      ftm: +cols[idx.FTM] || 0,
+      fta: +cols[idx.FTA] || 0,
+      tov: +cols[idx.TOV] || 0,
+      pts: +cols[idx.PTS] || 0,
+    };
+    if (rec.rowType === "PLAYER") state.rows.push(rec);
+    else if (rec.rowType === "TEAM") state.teamRows.push(rec);
+    seasonsSet.add(rec.season);
+  }
+  state.seasons = Array.from(seasonsSet).sort();
+  document.getElementById("data-meta").textContent =
+    `${state.rows.length.toLocaleString()} player-season-phase rows · ${state.seasons[0]} → ${state.seasons[state.seasons.length-1]}`;
+}
+
+function splitCsv(line) {
+  // Minimal CSV split. Our writer never quoted, but tolerate it.
+  const out = [];
+  let cur = "", inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"' && line[i+1] === '"') { cur += '"'; i++; }
+    else if (c === '"') inQ = !inQ;
+    else if (c === "," && !inQ) { out.push(cur); cur = ""; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+// ----------- controls -----------
+function initControls() {
+  // phase pills
+  document.querySelectorAll(".pill").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".pill").forEach(b => b.classList.remove("on"));
+      btn.classList.add("on");
+      state.phase = btn.dataset.phase;
+      render();
+    });
+  });
+
+  // season sliders
+  const sFrom = document.getElementById("season-from");
+  const sTo = document.getElementById("season-to");
+  sFrom.min = 0; sFrom.max = state.seasons.length - 1; sFrom.value = 0;
+  sTo.min = 0; sTo.max = state.seasons.length - 1; sTo.value = state.seasons.length - 1;
+  state.seasonFrom = +sFrom.value;
+  state.seasonTo = +sTo.value;
+  const onSlide = () => {
+    let a = +sFrom.value, b = +sTo.value;
+    if (a > b) { if (event.target === sFrom) sTo.value = a; else sFrom.value = b; }
+    state.seasonFrom = Math.min(+sFrom.value, +sTo.value);
+    state.seasonTo   = Math.max(+sFrom.value, +sTo.value);
+    updateRangeLabel();
+    render();
+  };
+  sFrom.addEventListener("input", onSlide);
+  sTo.addEventListener("input", onSlide);
+  updateRangeLabel();
+
+  // min FGA
+  const minFga = document.getElementById("min-fga");
+  minFga.addEventListener("input", () => {
+    state.minFga = +minFga.value || 0;
+    render();
+  });
+
+  // sort headers
+  document.querySelectorAll(".sortbtn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const k = btn.dataset.sort;
+      if (state.sortKey === k) {
+        state.sortDir *= -1;
+      } else {
+        state.sortKey = k;
+        // sensible defaults: text asc, numbers desc
+        state.sortDir = (k === "name" || k === "team") ? 1 : -1;
+      }
+      document.querySelectorAll(".sortbtn").forEach(b => b.classList.toggle("active", b === btn));
+      render();
+    });
+  });
+}
+
+function updateRangeLabel() {
+  document.getElementById("season-range-label").textContent =
+    `${state.seasons[state.seasonFrom]} → ${state.seasons[state.seasonTo]}`;
+}
+
+// ----------- aggregation + render -----------
+function aggregate() {
+  // filter player rows
+  const fromIdx = state.seasonFrom, toIdx = state.seasonTo;
+  const inRange = season => {
+    const i = state.seasons.indexOf(season);
+    return i >= fromIdx && i <= toIdx;
+  };
+  const phaseOk = p => state.phase === "ALL" ? true : p === state.phase;
+
+  // Per-player sum
+  const players = new Map();
+  for (const r of state.rows) {
+    if (!phaseOk(r.phase)) continue;
+    if (!inRange(r.season)) continue;
+    let p = players.get(r.playerId);
+    if (!p) {
+      p = { playerId: r.playerId, name: r.name, team: r.team,
+            games:0, fgm:0,fga:0,fg3m:0,fg3a:0,ftm:0,fta:0,tov:0,pts:0,
+            seasons:new Set(), lastSeason:"" };
+      players.set(r.playerId, p);
+    }
+    p.games+=r.games;
+    p.fgm+=r.fgm; p.fga+=r.fga; p.fg3m+=r.fg3m; p.fg3a+=r.fg3a;
+    p.ftm+=r.ftm; p.fta+=r.fta; p.tov+=r.tov; p.pts+=r.pts;
+    p.seasons.add(r.season);
+    if (r.season > p.lastSeason) { p.lastSeason = r.season; p.team = r.team; p.name = r.name || p.name; }
+  }
+
+  // Team totals across same filter (for usage proxy denominator)
+  const teamLoadByTeamSeason = new Map();
+  for (const t of state.teamRows) {
+    if (!phaseOk(t.phase)) continue;
+    if (!inRange(t.season)) continue;
+    const key = t.team;
+    const cur = teamLoadByTeamSeason.get(key) || 0;
+    teamLoadByTeamSeason.set(key, cur + (t.fga + 0.44*t.fta + t.tov));
+  }
+  // Approximate USG denominator as the average team load across filter.
+  // Real per-player-team breakdown is v2.
+  let totalTeamLoad = 0;
+  for (const v of teamLoadByTeamSeason.values()) totalTeamLoad += v;
+  const avgTeamLoad = teamLoadByTeamSeason.size ? totalTeamLoad / teamLoadByTeamSeason.size : 0;
+
+  const out = [];
+  for (const p of players.values()) {
+    if (p.fga < state.minFga) continue;
+    const possEq = p.fga + 0.44*p.fta + p.tov;
+    const ppg = p.games ? p.pts / p.games : 0;
+    out.push({
+      playerId: p.playerId,
+      name: p.name,
+      team: p.team,
+      games: p.games,
+      fgm: p.fgm, fga: p.fga, fg3m: p.fg3m, fg3a: p.fg3a,
+      ftm: p.ftm, fta: p.fta, tov: p.tov, pts: p.pts,
+      ppg: ppg,
+      fgpct: p.fga ? p.fgm/p.fga : 0,
+      fg3pct: p.fg3a ? p.fg3m/p.fg3a : 0,
+      efg: p.fga ? (p.fgm + 0.5*p.fg3m)/p.fga : 0,
+      usg: avgTeamLoad ? possEq / avgTeamLoad : 0,
+    });
+  }
+
+  // sort
+  const k = state.sortKey, d = state.sortDir;
+  out.sort((a,b) => {
+    let av = a[k], bv = b[k];
+    if (typeof av === "string") {
+      return av.localeCompare(bv) * d;
+    }
+    return (av - bv) * d;
+  });
+  return out;
+}
+
+function pct(x) { return (x * 100).toFixed(1) + "%"; }
+function dec(x, n=1) { return x.toFixed(n); }
+
+function render() {
+  const agg = aggregate();
+  document.getElementById("result-count").textContent =
+    `· ${agg.length.toLocaleString()} qualifiers`;
+  const body = document.getElementById("body");
+  if (!agg.length) {
+    body.innerHTML = `<div class="p-10 text-[color:var(--ink-mute)] mono text-sm">No players match the current filter. Lower the minimum FGA or widen the season range.</div>`;
+    return;
+  }
+  const cols = "44px 1.8fr 80px 60px 70px 70px 70px 70px 70px 70px 70px";
+  const rows = agg.slice(0, 250).map((p, i) => `
+    <div class="grid-row row-body ${i < 10 ? 'top10' : ''}"
+         style="grid-template-columns: ${cols};">
+      <div class="col-rank num">${i+1}</div>
+      <div class="truncate">${escapeHtml(p.name)}</div>
+      <div class="mono text-xs text-[color:var(--ink-mute)]">${escapeHtml(p.team)}</div>
+      <div class="num mono col-hide-sm ${state.sortKey==='games'?'col-active':''}">${p.games.toLocaleString()}</div>
+      <div class="num mono ${state.sortKey==='ppg'?'col-active':''}">${dec(p.ppg, 1)}</div>
+      <div class="num mono col-hide-sm ${state.sortKey==='pts'?'col-active':''}">${p.pts.toLocaleString()}</div>
+      <div class="num mono ${state.sortKey==='fga'?'col-active':''}">${p.fga.toLocaleString()}</div>
+      <div class="num mono ${state.sortKey==='fgpct'?'col-active':''}">${pct(p.fgpct)}</div>
+      <div class="num mono col-hide-sm ${state.sortKey==='fg3pct'?'col-active':''}">${p.fg3a ? pct(p.fg3pct) : "—"}</div>
+      <div class="num mono ${state.sortKey==='efg'?'col-active':''}">${pct(p.efg)}</div>
+      <div class="num mono col-hide-sm ${state.sortKey==='usg'?'col-active':''}">${pct(p.usg)}</div>
+    </div>
+  `).join("");
+  body.innerHTML = rows;
+}
+
+function escapeHtml(s) {
+  return (s||"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// boot
+load().catch(err => {
+  document.getElementById("body").innerHTML =
+    `<div class="p-8 text-[color:var(--bad)] mono text-sm">Failed to load data: ${escapeHtml(err.message)}</div>`;
+  console.error(err);
+});
+</script>
+</body>
+</html>
