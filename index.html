@@ -234,7 +234,7 @@
   <div id="table" class="border border-[color:var(--border)] bg-[color:var(--bg-2)]">
     <!-- header row -->
     <div id="head-row" class="grid-row head"
-         style="grid-template-columns: 44px 1.8fr 80px 60px 70px 70px 70px 70px 70px 70px 70px;">
+         style="grid-template-columns: 44px 1.8fr 80px 60px 70px 70px 70px 70px 70px 70px;">
       <div class="col-rank">#</div>
       <div><button class="sortbtn" data-sort="name">Player</button></div>
       <div><button class="sortbtn" data-sort="team">Team</button></div>
@@ -245,7 +245,6 @@
       <div class="num"><button class="sortbtn" data-sort="fgpct">FG%</button></div>
       <div class="num col-hide-sm"><button class="sortbtn" data-sort="fg3pct">3P%</button></div>
       <div class="num"><button class="sortbtn" data-sort="efg">eFG%</button></div>
-      <div class="num col-hide-sm"><button class="sortbtn" data-sort="usg">USG%</button></div>
     </div>
     <div id="body">
       <div class="p-10 flex items-center gap-4 text-[color:var(--ink-mute)]">
@@ -269,12 +268,11 @@
       </p>
     </div>
     <div>
-      <div class="head mb-2">USAGE NOTE</div>
+      <div class="head mb-2">WHAT&rsquo;S NEXT</div>
       <p>
-        USG% here is a <em>team-share proxy</em>: a player&rsquo;s clutch
-        (FGA + 0.44·FTA + TOV) divided by the average team clutch total within the
-        same filter. True usage rate requires on-court reconstruction and is a
-        later upgrade.
+        v2 adds true usage rate (requires on-court reconstruction), per-quarter splits
+        (Q4 vs OT separated), and opponent-defense filtering. The current view is
+        purely shooting splits and volume in the clutch window.
       </p>
     </div>
   </section>
@@ -451,25 +449,9 @@ function aggregate() {
     if (r.season > p.lastSeason) { p.lastSeason = r.season; p.team = r.team; p.name = r.name || p.name; }
   }
 
-  // Team totals across same filter (for usage proxy denominator)
-  const teamLoadByTeamSeason = new Map();
-  for (const t of state.teamRows) {
-    if (!phaseOk(t.phase)) continue;
-    if (!inRange(t.season)) continue;
-    const key = t.team;
-    const cur = teamLoadByTeamSeason.get(key) || 0;
-    teamLoadByTeamSeason.set(key, cur + (t.fga + 0.44*t.fta + t.tov));
-  }
-  // Approximate USG denominator as the average team load across filter.
-  // Real per-player-team breakdown is v2.
-  let totalTeamLoad = 0;
-  for (const v of teamLoadByTeamSeason.values()) totalTeamLoad += v;
-  const avgTeamLoad = teamLoadByTeamSeason.size ? totalTeamLoad / teamLoadByTeamSeason.size : 0;
-
   const out = [];
   for (const p of players.values()) {
     if (p.fga < state.minFga) continue;
-    const possEq = p.fga + 0.44*p.fta + p.tov;
     const ppg = p.games ? p.pts / p.games : 0;
     out.push({
       playerId: p.playerId,
@@ -482,7 +464,6 @@ function aggregate() {
       fgpct: p.fga ? p.fgm/p.fga : 0,
       fg3pct: p.fg3a ? p.fg3m/p.fg3a : 0,
       efg: p.fga ? (p.fgm + 0.5*p.fg3m)/p.fga : 0,
-      usg: avgTeamLoad ? possEq / avgTeamLoad : 0,
     });
   }
 
@@ -510,7 +491,7 @@ function render() {
     body.innerHTML = `<div class="p-10 text-[color:var(--ink-mute)] mono text-sm">No players match the current filter. Lower the minimum FGA or widen the season range.</div>`;
     return;
   }
-  const cols = "44px 1.8fr 80px 60px 70px 70px 70px 70px 70px 70px 70px";
+  const cols = "44px 1.8fr 80px 60px 70px 70px 70px 70px 70px 70px";
   const rows = agg.slice(0, 250).map((p, i) => `
     <div class="grid-row row-body ${i < 10 ? 'top10' : ''}"
          style="grid-template-columns: ${cols};">
@@ -524,7 +505,6 @@ function render() {
       <div class="num mono ${state.sortKey==='fgpct'?'col-active':''}">${pct(p.fgpct)}</div>
       <div class="num mono col-hide-sm ${state.sortKey==='fg3pct'?'col-active':''}">${p.fg3a ? pct(p.fg3pct) : "—"}</div>
       <div class="num mono ${state.sortKey==='efg'?'col-active':''}">${pct(p.efg)}</div>
-      <div class="num mono col-hide-sm ${state.sortKey==='usg'?'col-active':''}">${pct(p.usg)}</div>
     </div>
   `).join("");
   body.innerHTML = rows;
