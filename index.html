@@ -188,7 +188,16 @@
   </header>
 
   <!-- controls -->
-  <section class="mb-6 grid gap-5 sm:grid-cols-3">
+  <section class="mb-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+    <div>
+      <div class="head mb-2">TIME WINDOW</div>
+      <div class="flex gap-2 flex-wrap">
+        <button class="pill on" data-window="w5">Last 5:00</button>
+        <button class="pill" data-window="w1">Last 1:00</button>
+        <button class="pill" data-window="w10s">Last 0:10</button>
+      </div>
+    </div>
+
     <div>
       <div class="head mb-2">PHASE</div>
       <div class="flex gap-2 flex-wrap">
@@ -211,7 +220,7 @@
     </div>
 
     <div>
-      <div class="head mb-2">MINIMUM CLUTCH FGA (career, within filter)</div>
+      <div class="head mb-2">MIN. CLUTCH FGA (career, within filter)</div>
       <div class="flex items-center gap-3">
         <input type="number" id="min-fga" class="num-input" value="100" min="0" step="10" />
         <span class="text-xs text-[color:var(--ink-mute)]">attempts</span>
@@ -259,20 +268,22 @@
     <div>
       <div class="head mb-2">METHODOLOGY</div>
       <p>
-        A clutch event is any play with <strong>≥ 4th quarter</strong> and
-        <strong>≤ 5:00 remaining</strong> in that period, while the
-        <strong>absolute score margin is ≤ 5</strong>. Score margin carries forward
-        between scoring plays. All overtime minutes qualify (margin filter still applies).
-        PPG = clutch points / clutch games (games in which the player had at least one
-        clutch shot, FT, or turnover).
+        A clutch event has <strong>PERIOD ≥ 4</strong> and the
+        <strong>absolute score margin ≤ 5</strong>. The TIME WINDOW selector
+        further restricts which moments count: <em>Last 5:00</em> (the classic
+        NBA clutch window), <em>Last 1:00</em> (final minute of regulation or
+        any OT), or <em>Last 0:10</em> (final-shot territory). Tighter windows
+        are subsets of wider ones. Score margin carries forward between scoring
+        plays. PPG = clutch points / clutch games (games in which the player
+        had at least one event in the current window).
       </p>
     </div>
     <div>
       <div class="head mb-2">WHAT&rsquo;S NEXT</div>
       <p>
-        v2 adds true usage rate (requires on-court reconstruction), per-quarter splits
-        (Q4 vs OT separated), and opponent-defense filtering. The current view is
-        purely shooting splits and volume in the clutch window.
+        v2 adds true usage rate (requires on-court reconstruction), per-quarter
+        splits (Q4 vs OT separated), and opponent-defense filtering. The
+        current view is purely shooting splits and volume in the clutch window.
       </p>
     </div>
   </section>
@@ -293,12 +304,18 @@ const state = {
   teamRows: [],       // TEAM rows
   seasons: [],
   phase: "ALL",       // ALL | RS | PO
+  window: "w5",       // w5 | w1 | w10s
   seasonFrom: null,
   seasonTo: null,
   minFga: 100,
   sortKey: "ppg",
   sortDir: -1,        // -1 = desc
 };
+
+// Auto-adapt min FGA defaults per window. Tighter windows have far fewer reps,
+// so a 100-FGA gate empties them. The user can still override the input.
+const MIN_FGA_DEFAULTS = { w5: 100, w1: 30, w10s: 5 };
+const WINDOW_LABELS    = { w5: "Last 5:00", w1: "Last 1:00", w10s: "Last 0:10" };
 
 async function load() {
   const r = await fetch(DATA_PATH);
@@ -326,6 +343,7 @@ function parseCsv(text) {
       team: cols[idx.TEAM],
       season: cols[idx.SEASON],
       phase: cols[idx.PHASE],
+      window: cols[idx.WINDOW],
       games: +cols[idx.GAMES] || 0,
       fgm: +cols[idx.FGM] || 0,
       fga: +cols[idx.FGA] || 0,
@@ -341,8 +359,10 @@ function parseCsv(text) {
     seasonsSet.add(rec.season);
   }
   state.seasons = Array.from(seasonsSet).sort();
+  // Player rows now include a WINDOW column; w5 holds the wider universe.
+  const w5Rows = state.rows.filter(r => r.window === "w5").length;
   document.getElementById("data-meta").textContent =
-    `${state.rows.length.toLocaleString()} player-season-phase rows · ${state.seasons[0]} → ${state.seasons[state.seasons.length-1]}`;
+    `${w5Rows.toLocaleString()} player-seasons (5:00 window) · ${state.seasons[0]} → ${state.seasons[state.seasons.length-1]}`;
 }
 
 function splitCsv(line) {
@@ -362,12 +382,26 @@ function splitCsv(line) {
 
 // ----------- controls -----------
 function initControls() {
-  // phase pills
-  document.querySelectorAll(".pill").forEach(btn => {
+  // phase pills - clear/set within phase group only
+  document.querySelectorAll(".pill[data-phase]").forEach(btn => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".pill").forEach(b => b.classList.remove("on"));
+      document.querySelectorAll(".pill[data-phase]").forEach(b => b.classList.remove("on"));
       btn.classList.add("on");
       state.phase = btn.dataset.phase;
+      render();
+    });
+  });
+
+  // window pills - clear/set within window group only. Switching window also
+  // auto-adapts the min-FGA gate so tighter windows don't show an empty board.
+  document.querySelectorAll(".pill[data-window]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".pill[data-window]").forEach(b => b.classList.remove("on"));
+      btn.classList.add("on");
+      state.window = btn.dataset.window;
+      const def = MIN_FGA_DEFAULTS[state.window];
+      state.minFga = def;
+      document.getElementById("min-fga").value = def;
       render();
     });
   });
@@ -429,10 +463,12 @@ function aggregate() {
     return i >= fromIdx && i <= toIdx;
   };
   const phaseOk = p => state.phase === "ALL" ? true : p === state.phase;
+  const windowOk = w => w === state.window;
 
   // Per-player sum
   const players = new Map();
   for (const r of state.rows) {
+    if (!windowOk(r.window)) continue;
     if (!phaseOk(r.phase)) continue;
     if (!inRange(r.season)) continue;
     let p = players.get(r.playerId);
