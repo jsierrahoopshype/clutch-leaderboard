@@ -3,322 +3,250 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>All-Time Clutch — HoopsMatic</title>
-<meta name="description" content="NBA clutch-time leaderboard since 1996-97. Final 5 minutes, margin within 5. Filter by playoffs/regular season, season range, and qualifying attempts.">
-
-<!-- Tailwind via CDN -->
-<script src="https://cdn.tailwindcss.com"></script>
-
-<!-- pako for client-side gzip decode (data file is .csv.gz) -->
-<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+<title>NBA All-Time Clutch Leaderboard Since 1996-97 | HoopsMatic</title>
+<meta name="description" content="Career clutch splits for every NBA player since 1996-97. Last 5:00, 1:00, or 0:10 of Q4 and overtime, margin within 5. Filter by playoffs, regular season, and season range.">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Fraunces:opsz,wght@9..144,400;9..144,600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<!-- pako for client-side gzip decode -->
+<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
 
 <style>
-  :root {
-    --bg:        #0e0d0b;
-    --bg-2:      #16140f;
-    --bg-3:      #1d1a13;
-    --border:    #2a261d;
-    --ink:       #ece6d8;
-    --ink-mute:  #8c8576;
-    --ink-dim:   #5a5648;
-    --accent:    #ff5a1f;   /* scoreboard orange */
-    --accent-2:  #ffbe55;   /* highlight gold */
-    --good:      #6dd58c;
-    --bad:       #d56d6d;
-  }
-  html, body { background: var(--bg); color: var(--ink); }
-  body {
-    font-family: 'Fraunces', Georgia, serif;
-    font-feature-settings: "ss01" on, "ss02" on;
-    background:
-      radial-gradient(1200px 600px at 80% -10%, rgba(255,90,31,0.06), transparent 60%),
-      radial-gradient(900px 500px at -10% 30%, rgba(255,190,85,0.04), transparent 60%),
-      var(--bg);
-  }
-  .display { font-family: 'Bebas Neue', 'Arial Narrow', sans-serif; letter-spacing: 0.02em; }
-  .mono    { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+:root{
+  --bg:#f5f5f7;--surface:#fff;--surface-hover:#f0f0f2;--border:#d1d1d6;
+  --text:#1d1d1f;--text-secondary:#6e6e73;--accent:#3b82f6;--accent-dim:rgba(59,130,246,.15);
+  --green:#1d8a40;--green-dim:rgba(52,199,89,.16);--red:#d12c2c;--red-dim:rgba(239,68,68,.13);
+  --orange:#b26b00;--orange-dim:rgba(245,158,11,.16);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);
+  color:var(--text);min-height:100vh;line-height:1.5;-webkit-font-smoothing:antialiased}
+.container{max-width:1400px;margin:0 auto;padding:1.5rem 1.5rem 4rem}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
-  /* table */
-  .grid-row { display: grid; align-items: center; }
-  .grid-row > * { padding: 8px 10px; }
-  .num { font-variant-numeric: tabular-nums; }
+/* header */
+.hdr{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:.35rem;flex-wrap:wrap}
+.hdr h1{font-size:1.4rem;font-weight:700;letter-spacing:-.03em}
+.hdr .brand{font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--text-secondary);
+  text-transform:uppercase;letter-spacing:.08em}
+.subtitle{color:var(--text-secondary);font-size:.9rem;margin-bottom:1.25rem;max-width:60rem}
 
-  .col-rank   { width: 44px; text-align: right; color: var(--ink-dim); }
-  .head { color: var(--ink-mute); font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.08em; font-size: 12px; }
-  .head .sort-arrow { color: var(--accent); }
+/* filter bar */
+.filters{position:sticky;top:0;z-index:100;background:var(--bg);padding:.6rem 0 .9rem;
+  margin-bottom:.5rem;border-bottom:1px solid var(--border)}
+.filter-row{display:grid;grid-template-columns:1.2fr 1.2fr 1.5fr .8fr auto;gap:.6rem;align-items:end}
+.filter-group{display:flex;flex-direction:column;gap:.3rem;min-width:0}
+.filter-group label{font-size:.62rem;color:var(--text-secondary);text-transform:uppercase;
+  letter-spacing:.06em;font-weight:600}
+input[type=text],input[type=number],select{width:100%;padding:.5rem .8rem;font-size:.85rem;font-family:inherit;
+  border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);transition:.15s}
+input[type=number]{font-family:'JetBrains Mono',monospace}
+input:hover,select:hover{border-color:var(--accent)}
+input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
 
-  /* zebra */
-  .row-body:nth-child(even) { background: rgba(255,255,255,0.012); }
-  .row-body:hover { background: rgba(255,90,31,0.06); }
-  .row-body.top10 { background: linear-gradient(90deg, rgba(255,90,31,0.10), transparent 60%); }
+/* pill groups (window + phase) */
+.pill-row{display:flex;gap:.25rem;flex-wrap:wrap}
+.pill{font-family:'JetBrains Mono',monospace;font-size:.7rem;font-weight:600;
+  padding:.46rem .7rem;border:1px solid var(--border);border-radius:8px;background:var(--surface);
+  color:var(--text-secondary);text-decoration:none;cursor:pointer;transition:.15s;white-space:nowrap}
+.pill:hover{border-color:var(--accent);color:var(--accent)}
+.pill.on{background:var(--accent);border-color:var(--accent);color:#fff}
 
-  /* sort active column */
-  .col-active { color: var(--accent-2); }
+/* season range twin selects */
+.season-range{display:grid;grid-template-columns:1fr auto 1fr;align-items:end;gap:.35rem}
+.season-arrow{color:var(--text-secondary);font-size:.7rem;padding-bottom:.6rem;text-align:center}
 
-  /* range slider styling - keep subtle */
-  input[type=range] {
-    -webkit-appearance: none;
-    appearance: none;
-    background: transparent;
-    width: 100%;
-  }
-  input[type=range]::-webkit-slider-runnable-track {
-    background: var(--border);
-    height: 2px;
-  }
-  input[type=range]::-moz-range-track { background: var(--border); height: 2px; }
-  input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    height: 16px; width: 16px;
-    background: var(--accent);
-    border: 2px solid var(--bg);
-    border-radius: 50%;
-    margin-top: -7px;
-    box-shadow: 0 0 0 1px var(--accent);
-    cursor: pointer;
-  }
-  input[type=range]::-moz-range-thumb {
-    height: 14px; width: 14px;
-    background: var(--accent);
-    border: 2px solid var(--bg);
-    border-radius: 50%;
-    cursor: pointer;
-  }
+.reset-btn{padding:.5rem .8rem;font-size:.72rem;font-family:inherit;font-weight:600;text-transform:uppercase;
+  letter-spacing:.04em;border:1px solid var(--border);border-radius:8px;background:transparent;
+  color:var(--text-secondary);cursor:pointer;transition:.15s;white-space:nowrap}
+.reset-btn:hover{color:var(--text);border-color:var(--text-secondary);background:var(--surface-hover)}
 
-  /* phase pills */
-  .pill {
-    border: 1px solid var(--border);
-    background: var(--bg-2);
-    color: var(--ink-mute);
-    font-family: 'Bebas Neue', sans-serif;
-    letter-spacing: 0.10em;
-    font-size: 13px;
-    padding: 6px 14px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .pill:hover { color: var(--ink); border-color: var(--ink-dim); }
-  .pill.on {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #1a0e08;
-  }
+.summary{font-size:.74rem;color:var(--text-secondary);margin:.1rem 0 .9rem}
+.summary strong{color:var(--text);font-weight:600}
 
-  /* sort buttons in column headers */
-  .sortbtn {
-    background: none;
-    border: 0;
-    color: inherit;
-    cursor: pointer;
-    font: inherit;
-    letter-spacing: inherit;
-    padding: 0;
-    text-transform: inherit;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-  .sortbtn:hover { color: var(--ink); }
-  .sortbtn.active { color: var(--accent-2); }
+/* table */
+.table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+table.lb{width:100%;border-collapse:collapse;font-size:.86rem}
+table.lb thead th{background:var(--surface-hover);color:var(--text-secondary);text-transform:uppercase;
+  letter-spacing:.04em;font-size:.66rem;font-weight:600;padding:.7rem .6rem;text-align:center;
+  border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none;transition:color .15s}
+table.lb thead th:hover{color:var(--accent)}
+table.lb thead th.sorted-by{background:var(--accent-dim);color:var(--accent);font-weight:700}
+table.lb thead th.left{text-align:left}
+table.lb thead th .arr{font-size:.6rem;opacity:.7;margin-left:.15rem}
+table.lb tbody tr{border-bottom:1px solid var(--border);transition:background .12s;cursor:pointer}
+table.lb tbody tr:last-child{border-bottom:none}
+table.lb tbody tr:hover{background:var(--surface-hover)}
+table.lb td{padding:.55rem .6rem;text-align:center;font-family:'JetBrains Mono',monospace;
+  font-weight:500;white-space:nowrap}
+table.lb td.sorted-by{background:rgba(59,130,246,.05)}
+td.rank{color:var(--text-secondary);font-size:.78rem;width:2.4rem}
+table.lb td.player{text-align:left;font-family:'DM Sans',sans-serif;max-width:18rem}
+.player-name{font-weight:600;color:var(--text)}
+.player-team{font-size:.7rem;color:var(--text-secondary);font-family:'JetBrains Mono',monospace;
+  margin-left:.5rem;text-transform:uppercase;letter-spacing:.04em}
+.dash{color:var(--text-secondary)}
 
-  /* loader */
-  .loader {
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    width: 28px; height: 28px;
-    animation: spin 0.9s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
+/* mobile cards */
+.cards{display:none}
+.card{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:.8rem .9rem;margin-bottom:.6rem;cursor:pointer;transition:.15s}
+.card:hover{border-color:var(--accent)}
+.card-rank{position:absolute;top:.7rem;right:.9rem;font-family:'JetBrains Mono',monospace;font-size:.66rem;
+  color:var(--text-secondary)}
+.card-head .nm{font-weight:600;font-size:.96rem}
+.card-head .ou{font-size:.74rem;color:var(--text-secondary);margin-top:.1rem;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.04em}
+.card-stats{margin-top:.55rem;display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem .8rem;font-size:.78rem}
+.card-stats .lbl{display:block;font-size:.6rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:.05rem}
+.card-stats .val{font-family:'JetBrains Mono',monospace;font-weight:600}
 
-  /* decorative scoreboard ticker line */
-  .tape {
-    background:
-      repeating-linear-gradient(90deg,
-        var(--border) 0 4px, transparent 4px 8px);
-    height: 2px; opacity: 0.6;
-  }
+.empty{text-align:center;padding:3rem 1rem;color:var(--text-secondary)}
+.loader-row{padding:2.5rem 1rem;text-align:center;color:var(--text-secondary);font-size:.85rem}
+.loader{display:inline-block;width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .9s linear infinite;vertical-align:middle;margin-right:.5rem}
+@keyframes spin{to{transform:rotate(360deg)}}
 
-  /* min-attempts input */
-  .num-input {
-    background: var(--bg-2);
-    border: 1px solid var(--border);
-    color: var(--ink);
-    padding: 6px 10px;
-    width: 80px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
-  }
-  .num-input:focus { outline: none; border-color: var(--accent); }
+.method{margin-top:1.4rem;padding:1rem 1.1rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;font-size:.82rem;color:var(--text-secondary);line-height:1.6}
+.method strong{color:var(--text);font-weight:600}
+.method .head{font-family:'JetBrains Mono',monospace;font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary);font-weight:600;margin-bottom:.45rem}
+.method-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
 
-  /* mobile */
-  @media (max-width: 720px) {
-    .grid-row > .col-hide-sm { display: none; }
-  }
+.foot{text-align:center;font-size:.72rem;color:var(--text-secondary);margin-top:1.4rem;
+  font-family:'JetBrains Mono',monospace;line-height:1.7}
+
+@media(max-width:860px){
+  .filter-row{grid-template-columns:1fr 1fr;gap:.4rem}
+  .filter-group.full{grid-column:1/-1}
+  .filter-group.reset-group{grid-column:1/-1}
+  .reset-btn{width:100%;padding:.45rem}
+  .table-wrap{display:none}
+  .cards{display:block}
+  .subtitle{display:none}
+  .hdr{margin-bottom:.5rem}
+  .hdr h1{font-size:1.15rem}
+  .hdr .brand{display:none}
+  .filters{padding:.3rem 0 .5rem}
+  .filter-group label{font-size:.54rem;margin-bottom:.05rem;letter-spacing:.04em}
+  /* iOS Safari zooms when input font-size < 16px; force 16px on mobile */
+  input[type=text],input[type=number],select{padding:.5rem .6rem;font-size:16px}
+  .summary{margin:.1rem 0 .6rem;font-size:.7rem}
+  .method-grid{grid-template-columns:1fr}
+}
 </style>
 </head>
-<body class="min-h-screen">
+<body>
+<div class="container">
 
-<div class="max-w-6xl mx-auto px-5 sm:px-8 py-10">
+  <div class="hdr">
+    <h1>All-Time Clutch</h1>
+    <span class="brand">HoopsMatic · All-Time Clutch</span>
+  </div>
+  <p class="subtitle">Career splits in the final five minutes of Q4 or any overtime, margin within five. Every play-by-play event since the 1996&ndash;97 season, attributed to the player who took it.</p>
 
-  <!-- masthead -->
-  <header class="mb-8">
-    <div class="flex items-start justify-between gap-4 flex-wrap">
+  <div class="filters">
+    <div class="filter-row">
+      <div class="filter-group">
+        <label>Time window</label>
+        <div class="pill-row" id="window-pills">
+          <button class="pill on" data-window="w5">Last 5:00</button>
+          <button class="pill" data-window="w1">Last 1:00</button>
+          <button class="pill" data-window="w10s">Last 0:10</button>
+        </div>
+      </div>
+      <div class="filter-group">
+        <label>Phase</label>
+        <div class="pill-row" id="phase-pills">
+          <button class="pill on" data-phase="ALL">All</button>
+          <button class="pill" data-phase="RS">Regular</button>
+          <button class="pill" data-phase="PO">Playoffs</button>
+        </div>
+      </div>
+      <div class="filter-group">
+        <label>Seasons</label>
+        <div class="season-range">
+          <select id="fFrom"></select>
+          <span class="season-arrow">→</span>
+          <select id="fTo"></select>
+        </div>
+      </div>
+      <div class="filter-group">
+        <label>Min. clutch FGA</label>
+        <input type="number" id="min-fga" value="200" min="0" step="10" />
+      </div>
+      <div class="filter-group reset-group">
+        <label>&nbsp;</label>
+        <button class="reset-btn" id="reset">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="summary" id="summary"></div>
+
+  <div class="table-wrap">
+    <table class="lb">
+      <thead>
+        <tr id="head"></tr>
+      </thead>
+      <tbody id="body">
+        <tr><td colspan="10" class="loader-row"><span class="loader"></span> Loading clutch splits&hellip;</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="cards" id="cards"></div>
+  <div class="empty" id="empty" style="display:none">No players match those filters. Try lowering the minimum FGA or widening the season range.</div>
+
+  <div class="method">
+    <div class="method-grid">
       <div>
-        <div class="text-xs mono tracking-[0.3em] text-[color:var(--accent)] uppercase mb-2">HoopsMatic · Tool</div>
-        <h1 class="display text-5xl sm:text-7xl leading-none">
-          All-Time Clutch
-        </h1>
-        <p class="mt-3 text-[color:var(--ink-mute)] max-w-2xl">
-          Career splits in the final five minutes of Q4 or any overtime, margin within five.
-          Every play-by-play event since the 1996&ndash;97 season, attributed to the player who took it.
-        </p>
+        <div class="head">Methodology</div>
+        <p>A clutch event has <strong>PERIOD ≥ 4</strong> and the <strong>absolute score margin ≤ 5</strong>. The TIME WINDOW selector further restricts which moments count: <em>Last 5:00</em> (the classic NBA clutch window), <em>Last 1:00</em> (final minute of regulation or any OT), or <em>Last 0:10</em> (final-shot territory). Tighter windows are subsets of wider ones. PPG = clutch points / clutch games (games in which the player had at least one event in the current window).</p>
       </div>
-      <div class="text-right text-xs mono text-[color:var(--ink-dim)] mt-2">
-        <div>SOURCE · stats.nba.com PBP</div>
-        <div>ARCHIVE · shufinskiy/nba_data</div>
-      </div>
-    </div>
-    <div class="tape mt-6"></div>
-  </header>
-
-  <!-- controls -->
-  <section class="mb-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-    <div>
-      <div class="head mb-2">TIME WINDOW</div>
-      <div class="flex gap-2 flex-wrap">
-        <button class="pill on" data-window="w5">Last 5:00</button>
-        <button class="pill" data-window="w1">Last 1:00</button>
-        <button class="pill" data-window="w10s">Last 0:10</button>
-      </div>
-    </div>
-
-    <div>
-      <div class="head mb-2">PHASE</div>
-      <div class="flex gap-2 flex-wrap">
-        <button class="pill on" data-phase="ALL">All</button>
-        <button class="pill" data-phase="RS">Regular Season</button>
-        <button class="pill" data-phase="PO">Playoffs</button>
-      </div>
-    </div>
-
-    <div>
-      <div class="head mb-2 flex justify-between">
-        <span>SEASON RANGE</span>
-        <span id="season-range-label" class="text-[color:var(--ink)] mono"></span>
-      </div>
-      <div class="flex items-center gap-3">
-        <input type="range" id="season-from" />
-        <span class="mono text-xs text-[color:var(--ink-mute)]">to</span>
-        <input type="range" id="season-to" />
-      </div>
-    </div>
-
-    <div>
-      <div class="head mb-2">MIN. CLUTCH FGA (auto-adjusts per window)</div>
-      <div class="flex items-center gap-3">
-        <input type="number" id="min-fga" class="num-input" value="200" min="0" step="10" />
-        <span class="text-xs text-[color:var(--ink-mute)]">attempts</span>
-      </div>
-    </div>
-  </section>
-
-  <div class="tape mb-2"></div>
-
-  <!-- summary line -->
-  <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
-    <div class="display text-2xl text-[color:var(--ink)]">
-      Leaderboard
-      <span id="result-count" class="text-[color:var(--ink-mute)] text-base align-middle ml-2"></span>
-    </div>
-    <div class="text-xs mono text-[color:var(--ink-dim)]">Sort by clicking a column. Default: PPG.</div>
-  </div>
-
-  <!-- table -->
-  <div id="table" class="border border-[color:var(--border)] bg-[color:var(--bg-2)]">
-    <!-- header row -->
-    <div id="head-row" class="grid-row head"
-         style="grid-template-columns: 44px 1.8fr 80px 60px 70px 70px 70px 70px 70px 70px;">
-      <div class="col-rank">#</div>
-      <div><button class="sortbtn" data-sort="name">Player</button></div>
-      <div><button class="sortbtn" data-sort="team">Team</button></div>
-      <div class="num col-hide-sm"><button class="sortbtn" data-sort="games">GP</button></div>
-      <div class="num"><button class="sortbtn active" data-sort="ppg">PPG</button></div>
-      <div class="num col-hide-sm"><button class="sortbtn" data-sort="pts">PTS</button></div>
-      <div class="num"><button class="sortbtn" data-sort="fga">FGA</button></div>
-      <div class="num"><button class="sortbtn" data-sort="fgpct">FG%</button></div>
-      <div class="num col-hide-sm"><button class="sortbtn" data-sort="fg3pct">3P%</button></div>
-      <div class="num"><button class="sortbtn" data-sort="efg">eFG%</button></div>
-    </div>
-    <div id="body">
-      <div class="p-10 flex items-center gap-4 text-[color:var(--ink-mute)]">
-        <div class="loader"></div>
-        <div class="mono text-sm">Loading clutch_splits.csv.gz …</div>
+      <div>
+        <div class="head">What's next</div>
+        <p>v2 adds true usage rate (requires on-court reconstruction), per-quarter splits (Q4 vs OT separated), and opponent-defense filtering. The current view is purely shooting splits and volume in the clutch window.</p>
       </div>
     </div>
   </div>
 
-  <!-- methodology / footer -->
-  <section class="mt-10 grid gap-6 sm:grid-cols-2 text-sm text-[color:var(--ink-mute)]">
-    <div>
-      <div class="head mb-2">METHODOLOGY</div>
-      <p>
-        A clutch event has <strong>PERIOD ≥ 4</strong> and the
-        <strong>absolute score margin ≤ 5</strong>. The TIME WINDOW selector
-        further restricts which moments count: <em>Last 5:00</em> (the classic
-        NBA clutch window), <em>Last 1:00</em> (final minute of regulation or
-        any OT), or <em>Last 0:10</em> (final-shot territory). Tighter windows
-        are subsets of wider ones. Score margin carries forward between scoring
-        plays. PPG = clutch points / clutch games (games in which the player
-        had at least one event in the current window).
-      </p>
-    </div>
-    <div>
-      <div class="head mb-2">WHAT&rsquo;S NEXT</div>
-      <p>
-        v2 adds true usage rate (requires on-court reconstruction), per-quarter
-        splits (Q4 vs OT separated), and opponent-defense filtering. The
-        current view is purely shooting splits and volume in the clutch window.
-      </p>
-    </div>
-  </section>
-
-  <div class="tape my-8"></div>
-
-  <footer class="text-xs mono text-[color:var(--ink-dim)] flex flex-wrap justify-between gap-3">
-    <div>HoopsMatic · All-Time Clutch · v1</div>
-    <div id="data-meta"></div>
-  </footer>
+  <div class="foot">
+    Source · stats.nba.com PBP via shufinskiy/nba_data · Apache-2.0<br>
+    1996&ndash;97 through 2024&ndash;25 · HoopsMatic
+  </div>
 </div>
 
 <script>
-// ----------- data load -----------
 const DATA_PATH = "clutch_splits.csv.gz";
+
 const state = {
-  rows: [],           // PLAYER rows
-  teamRows: [],       // TEAM rows
+  rows: [],
+  teamRows: [],
   seasons: [],
-  phase: "ALL",       // ALL | RS | PO
-  window: "w5",       // w5 | w1 | w10s
-  seasonFrom: null,
-  seasonTo: null,
+  phase: "ALL",
+  window: "w5",
+  seasonFromIdx: 0,
+  seasonToIdx: 0,
   minFga: 200,
   sortKey: "ppg",
-  sortDir: -1,        // -1 = desc
+  sortDir: "desc",
 };
 
-// Auto-adapt min FGA defaults per window. Tighter windows have far fewer reps,
-// so a 200-FGA gate empties them. But the thresholds also need to be high
-// enough that the leaderboard reads like real all-time lore, not rookies with
-// 4 attempts. The user can still override the input.
 const MIN_FGA_DEFAULTS = { w5: 200, w1: 100, w10s: 25 };
 const WINDOW_LABELS    = { w5: "Last 5:00", w1: "Last 1:00", w10s: "Last 0:10" };
 
+const COLS = [
+  {key:'rank', label:'#', cls:'rank', sortable:false},
+  {key:'name', label:'Player', cls:'player left', sortable:true, type:'str'},
+  {key:'games', label:'GP', sortable:true, type:'num', def:'desc'},
+  {key:'ppg', label:'PPG', sortable:true, type:'num', def:'desc'},
+  {key:'pts', label:'PTS', sortable:true, type:'num', def:'desc'},
+  {key:'fga', label:'FGA', sortable:true, type:'num', def:'desc'},
+  {key:'fgpct', label:'FG%', sortable:true, type:'num', def:'desc'},
+  {key:'fg3pct', label:'3P%', sortable:true, type:'num', def:'desc'},
+  {key:'efg', label:'eFG%', sortable:true, type:'num', def:'desc'},
+];
+
+// ----------- data load -----------
 async function load() {
   const r = await fetch(DATA_PATH);
   if (!r.ok) throw new Error("data fetch failed: " + r.status);
@@ -335,7 +263,6 @@ function parseCsv(text) {
   const idx = Object.fromEntries(head.map((h, i) => [h, i]));
   const seasonsSet = new Set();
   for (let i = 1; i < lines.length; i++) {
-    // CSV without quoted commas in this dataset, but be safe
     const cols = splitCsv(lines[i]);
     if (cols.length < head.length) continue;
     const rec = {
@@ -361,14 +288,11 @@ function parseCsv(text) {
     seasonsSet.add(rec.season);
   }
   state.seasons = Array.from(seasonsSet).sort();
-  // Player rows now include a WINDOW column; w5 holds the wider universe.
-  const w5Rows = state.rows.filter(r => r.window === "w5").length;
-  document.getElementById("data-meta").textContent =
-    `${w5Rows.toLocaleString()} player-seasons (5:00 window) · ${state.seasons[0]} → ${state.seasons[state.seasons.length-1]}`;
+  state.seasonFromIdx = 0;
+  state.seasonToIdx = state.seasons.length - 1;
 }
 
 function splitCsv(line) {
-  // Minimal CSV split. Our writer never quoted, but tolerate it.
   const out = [];
   let cur = "", inQ = false;
   for (let i = 0; i < line.length; i++) {
@@ -384,21 +308,32 @@ function splitCsv(line) {
 
 // ----------- controls -----------
 function initControls() {
-  // phase pills - clear/set within phase group only
-  document.querySelectorAll(".pill[data-phase]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".pill[data-phase]").forEach(b => b.classList.remove("on"));
-      btn.classList.add("on");
-      state.phase = btn.dataset.phase;
-      render();
-    });
+  // Season range selects
+  const fFrom = document.getElementById("fFrom");
+  const fTo = document.getElementById("fTo");
+  state.seasons.forEach((s, i) => {
+    const o1 = document.createElement("option"); o1.value = i; o1.textContent = s; fFrom.appendChild(o1);
+    const o2 = document.createElement("option"); o2.value = i; o2.textContent = s; fTo.appendChild(o2);
+  });
+  fFrom.value = state.seasonFromIdx;
+  fTo.value = state.seasonToIdx;
+  fFrom.addEventListener("change", () => {
+    let a = +fFrom.value, b = +fTo.value;
+    if (a > b) { fTo.value = a; b = a; }
+    state.seasonFromIdx = a; state.seasonToIdx = b;
+    render();
+  });
+  fTo.addEventListener("change", () => {
+    let a = +fFrom.value, b = +fTo.value;
+    if (b < a) { fFrom.value = b; a = b; }
+    state.seasonFromIdx = a; state.seasonToIdx = b;
+    render();
   });
 
-  // window pills - clear/set within window group only. Switching window also
-  // auto-adapts the min-FGA gate so tighter windows don't show an empty board.
-  document.querySelectorAll(".pill[data-window]").forEach(btn => {
+  // Window pills
+  document.querySelectorAll('#window-pills .pill').forEach(btn => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".pill[data-window]").forEach(b => b.classList.remove("on"));
+      document.querySelectorAll('#window-pills .pill').forEach(b => b.classList.remove("on"));
       btn.classList.add("on");
       state.window = btn.dataset.window;
       const def = MIN_FGA_DEFAULTS[state.window];
@@ -408,58 +343,41 @@ function initControls() {
     });
   });
 
-  // season sliders
-  const sFrom = document.getElementById("season-from");
-  const sTo = document.getElementById("season-to");
-  sFrom.min = 0; sFrom.max = state.seasons.length - 1; sFrom.value = 0;
-  sTo.min = 0; sTo.max = state.seasons.length - 1; sTo.value = state.seasons.length - 1;
-  state.seasonFrom = +sFrom.value;
-  state.seasonTo = +sTo.value;
-  const onSlide = () => {
-    let a = +sFrom.value, b = +sTo.value;
-    if (a > b) { if (event.target === sFrom) sTo.value = a; else sFrom.value = b; }
-    state.seasonFrom = Math.min(+sFrom.value, +sTo.value);
-    state.seasonTo   = Math.max(+sFrom.value, +sTo.value);
-    updateRangeLabel();
-    render();
-  };
-  sFrom.addEventListener("input", onSlide);
-  sTo.addEventListener("input", onSlide);
-  updateRangeLabel();
-
-  // min FGA
-  const minFga = document.getElementById("min-fga");
-  minFga.addEventListener("input", () => {
-    state.minFga = +minFga.value || 0;
-    render();
-  });
-
-  // sort headers
-  document.querySelectorAll(".sortbtn").forEach(btn => {
+  // Phase pills
+  document.querySelectorAll('#phase-pills .pill').forEach(btn => {
     btn.addEventListener("click", () => {
-      const k = btn.dataset.sort;
-      if (state.sortKey === k) {
-        state.sortDir *= -1;
-      } else {
-        state.sortKey = k;
-        // sensible defaults: text asc, numbers desc
-        state.sortDir = (k === "name" || k === "team") ? 1 : -1;
-      }
-      document.querySelectorAll(".sortbtn").forEach(b => b.classList.toggle("active", b === btn));
+      document.querySelectorAll('#phase-pills .pill').forEach(b => b.classList.remove("on"));
+      btn.classList.add("on");
+      state.phase = btn.dataset.phase;
       render();
     });
   });
+
+  // Min FGA
+  document.getElementById("min-fga").addEventListener("input", e => {
+    state.minFga = +e.target.value || 0;
+    render();
+  });
+
+  // Reset
+  document.getElementById("reset").addEventListener("click", () => {
+    state.window = "w5";
+    state.phase = "ALL";
+    state.seasonFromIdx = 0;
+    state.seasonToIdx = state.seasons.length - 1;
+    state.minFga = MIN_FGA_DEFAULTS.w5;
+    state.sortKey = "ppg"; state.sortDir = "desc";
+    document.querySelectorAll('#window-pills .pill').forEach(b => b.classList.toggle("on", b.dataset.window === "w5"));
+    document.querySelectorAll('#phase-pills .pill').forEach(b => b.classList.toggle("on", b.dataset.phase === "ALL"));
+    fFrom.value = 0; fTo.value = state.seasons.length - 1;
+    document.getElementById("min-fga").value = state.minFga;
+    render();
+  });
 }
 
-function updateRangeLabel() {
-  document.getElementById("season-range-label").textContent =
-    `${state.seasons[state.seasonFrom]} → ${state.seasons[state.seasonTo]}`;
-}
-
-// ----------- aggregation + render -----------
+// ----------- aggregation -----------
 function aggregate() {
-  // filter player rows
-  const fromIdx = state.seasonFrom, toIdx = state.seasonTo;
+  const fromIdx = state.seasonFromIdx, toIdx = state.seasonToIdx;
   const inRange = season => {
     const i = state.seasons.indexOf(season);
     return i >= fromIdx && i <= toIdx;
@@ -467,7 +385,6 @@ function aggregate() {
   const phaseOk = p => state.phase === "ALL" ? true : p === state.phase;
   const windowOk = w => w === state.window;
 
-  // Per-player sum
   const players = new Map();
   for (const r of state.rows) {
     if (!windowOk(r.window)) continue;
@@ -477,20 +394,18 @@ function aggregate() {
     if (!p) {
       p = { playerId: r.playerId, name: r.name, team: r.team,
             games:0, fgm:0,fga:0,fg3m:0,fg3a:0,ftm:0,fta:0,tov:0,pts:0,
-            seasons:new Set(), lastSeason:"" };
+            lastSeason:"" };
       players.set(r.playerId, p);
     }
     p.games+=r.games;
     p.fgm+=r.fgm; p.fga+=r.fga; p.fg3m+=r.fg3m; p.fg3a+=r.fg3a;
     p.ftm+=r.ftm; p.fta+=r.fta; p.tov+=r.tov; p.pts+=r.pts;
-    p.seasons.add(r.season);
     if (r.season > p.lastSeason) { p.lastSeason = r.season; p.team = r.team; p.name = r.name || p.name; }
   }
 
   const out = [];
   for (const p of players.values()) {
     if (p.fga < state.minFga) continue;
-    const ppg = p.games ? p.pts / p.games : 0;
     out.push({
       playerId: p.playerId,
       name: p.name,
@@ -498,64 +413,99 @@ function aggregate() {
       games: p.games,
       fgm: p.fgm, fga: p.fga, fg3m: p.fg3m, fg3a: p.fg3a,
       ftm: p.ftm, fta: p.fta, tov: p.tov, pts: p.pts,
-      ppg: ppg,
+      ppg: p.games ? p.pts / p.games : 0,
       fgpct: p.fga ? p.fgm/p.fga : 0,
       fg3pct: p.fg3a ? p.fg3m/p.fg3a : 0,
       efg: p.fga ? (p.fgm + 0.5*p.fg3m)/p.fga : 0,
     });
   }
 
-  // sort
-  const k = state.sortKey, d = state.sortDir;
+  const k = state.sortKey, dir = state.sortDir === "desc" ? -1 : 1;
   out.sort((a,b) => {
     let av = a[k], bv = b[k];
-    if (typeof av === "string") {
-      return av.localeCompare(bv) * d;
-    }
-    return (av - bv) * d;
+    if (typeof av === "string") return av.localeCompare(bv) * dir;
+    return (av - bv) * dir;
   });
   return out;
 }
 
+// ----------- format -----------
 function pct(x) { return (x * 100).toFixed(1) + "%"; }
-function dec(x, n=1) { return x.toFixed(n); }
+function dec(x, n) { return x.toFixed(n); }
+function esc(s) { return (s||"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
+// ----------- render -----------
 function render() {
   const agg = aggregate();
-  document.getElementById("result-count").textContent =
-    `· ${agg.length.toLocaleString()} qualifiers`;
-  const body = document.getElementById("body");
+
+  // Summary
+  document.getElementById("summary").innerHTML =
+    `<strong>${agg.length.toLocaleString()}</strong> qualifying players · ${WINDOW_LABELS[state.window]} · ${state.phase === "ALL" ? "RS + Playoffs" : (state.phase === "RS" ? "Regular Season" : "Playoffs only")}`;
+
+  // Head
+  const head = document.getElementById("head"); head.innerHTML = "";
+  COLS.forEach(c => {
+    const th = document.createElement("th");
+    th.className = (c.cls || "") + (c.key === state.sortKey ? " sorted-by" : "");
+    if ((c.cls||"").includes("left")) th.classList.add("left");
+    th.innerHTML = c.label + (c.key === state.sortKey ? ` <span class="arr">${state.sortDir === "desc" ? "▼" : "▲"}</span>` : "");
+    if (c.sortable) th.onclick = () => {
+      if (state.sortKey === c.key) state.sortDir = state.sortDir === "desc" ? "asc" : "desc";
+      else { state.sortKey = c.key; state.sortDir = c.def || (c.type === "str" ? "asc" : "desc"); }
+      render();
+    };
+    else th.style.cursor = "default";
+    head.appendChild(th);
+  });
+
+  // Body
+  const body = document.getElementById("body"); body.innerHTML = "";
+  const empty = document.getElementById("empty");
   if (!agg.length) {
-    body.innerHTML = `<div class="p-10 text-[color:var(--ink-mute)] mono text-sm">No players match the current filter. Lower the minimum FGA or widen the season range.</div>`;
+    empty.style.display = "block";
     return;
   }
-  const cols = "44px 1.8fr 80px 60px 70px 70px 70px 70px 70px 70px";
-  const rows = agg.slice(0, 250).map((p, i) => `
-    <div class="grid-row row-body ${i < 10 ? 'top10' : ''}"
-         style="grid-template-columns: ${cols};">
-      <div class="col-rank num">${i+1}</div>
-      <div class="truncate">${escapeHtml(p.name)}</div>
-      <div class="mono text-xs text-[color:var(--ink-mute)]">${escapeHtml(p.team)}</div>
-      <div class="num mono col-hide-sm ${state.sortKey==='games'?'col-active':''}">${p.games.toLocaleString()}</div>
-      <div class="num mono ${state.sortKey==='ppg'?'col-active':''}">${dec(p.ppg, 1)}</div>
-      <div class="num mono col-hide-sm ${state.sortKey==='pts'?'col-active':''}">${p.pts.toLocaleString()}</div>
-      <div class="num mono ${state.sortKey==='fga'?'col-active':''}">${p.fga.toLocaleString()}</div>
-      <div class="num mono ${state.sortKey==='fgpct'?'col-active':''}">${pct(p.fgpct)}</div>
-      <div class="num mono col-hide-sm ${state.sortKey==='fg3pct'?'col-active':''}">${p.fg3a ? pct(p.fg3pct) : "—"}</div>
-      <div class="num mono ${state.sortKey==='efg'?'col-active':''}">${pct(p.efg)}</div>
-    </div>
-  `).join("");
-  body.innerHTML = rows;
-}
+  empty.style.display = "none";
+  agg.slice(0, 250).forEach((p, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td class="rank">${i+1}</td>`+
+      `<td class="player${k('name')}"><span class="player-name">${esc(p.name)}</span><span class="player-team">${esc(p.team)}</span></td>`+
+      `<td class="${k('games')}">${p.games.toLocaleString()}</td>`+
+      `<td class="${k('ppg')}">${dec(p.ppg,1)}</td>`+
+      `<td class="${k('pts')}">${p.pts.toLocaleString()}</td>`+
+      `<td class="${k('fga')}">${p.fga.toLocaleString()}</td>`+
+      `<td class="${k('fgpct')}">${pct(p.fgpct)}</td>`+
+      `<td class="${k('fg3pct')}">${p.fg3a ? pct(p.fg3pct) : '<span class="dash">—</span>'}</td>`+
+      `<td class="${k('efg')}">${pct(p.efg)}</td>`;
+    body.appendChild(tr);
+  });
 
-function escapeHtml(s) {
-  return (s||"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  // Mobile cards
+  const cards = document.getElementById("cards"); cards.innerHTML = "";
+  agg.slice(0, 250).forEach((p, i) => {
+    const div = document.createElement("div"); div.className = "card";
+    div.innerHTML =
+      `<div class="card-rank">#${i+1}</div>`+
+      `<div class="card-head"><div class="nm">${esc(p.name)}</div><div class="ou">${esc(p.team)}</div></div>`+
+      `<div class="card-stats">`+
+        `<div><span class="lbl">GP</span><span class="val">${p.games.toLocaleString()}</span></div>`+
+        `<div><span class="lbl">PPG</span><span class="val">${dec(p.ppg,1)}</span></div>`+
+        `<div><span class="lbl">PTS</span><span class="val">${p.pts.toLocaleString()}</span></div>`+
+        `<div><span class="lbl">FGA</span><span class="val">${p.fga.toLocaleString()}</span></div>`+
+        `<div><span class="lbl">FG%</span><span class="val">${pct(p.fgpct)}</span></div>`+
+        `<div><span class="lbl">3P%</span><span class="val">${p.fg3a ? pct(p.fg3pct) : '—'}</span></div>`+
+        `<div><span class="lbl">eFG%</span><span class="val">${pct(p.efg)}</span></div>`+
+      `</div>`;
+    cards.appendChild(div);
+  });
 }
+function k(key) { return key === state.sortKey ? " sorted-by" : ""; }
 
 // boot
 load().catch(err => {
   document.getElementById("body").innerHTML =
-    `<div class="p-8 text-[color:var(--bad)] mono text-sm">Failed to load data: ${escapeHtml(err.message)}</div>`;
+    `<tr><td colspan="10" class="loader-row" style="color:var(--red)">Failed to load data: ${esc(err.message)}</td></tr>`;
   console.error(err);
 });
 </script>
