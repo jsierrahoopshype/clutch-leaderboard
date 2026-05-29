@@ -466,41 +466,66 @@ function render() {
     return;
   }
   empty.style.display = "none";
-  agg.slice(0, 250).forEach((p, i) => {
+
+  // Per-column min/max for the gradient. Computed once per render so the
+  // ramps recolor as the user changes filters. 3P% only counts players who
+  // actually attempted threes (fg3a > 0) - otherwise the "—" rows would pin
+  // min at 0 and squash the ramp for everyone else.
+  const numericCols = ['games','ppg','pts','fga','fgpct','fg3pct','efg'];
+  const ranges = {};
+  numericCols.forEach(c => {
+    const vals = agg
+      .map(p => c === 'fg3pct' ? (p.fg3a > 0 ? p.fg3pct : null) : p[c])
+      .filter(v => v != null && !isNaN(v));
+    ranges[c] = vals.length ? { min: Math.min(...vals), max: Math.max(...vals) } : { min: 0, max: 0 };
+  });
+
+  agg.forEach((p, i) => {
     const tr = document.createElement("tr");
     tr.innerHTML =
       `<td class="rank">${i+1}</td>`+
-      `<td class="player${k('name')}"><span class="player-name">${esc(p.name)}</span><span class="player-team">${esc(p.team)}</span></td>`+
-      `<td class="${k('games')}">${p.games.toLocaleString()}</td>`+
-      `<td class="${k('ppg')}">${dec(p.ppg,1)}</td>`+
-      `<td class="${k('pts')}">${p.pts.toLocaleString()}</td>`+
-      `<td class="${k('fga')}">${p.fga.toLocaleString()}</td>`+
-      `<td class="${k('fgpct')}">${pct(p.fgpct)}</td>`+
-      `<td class="${k('fg3pct')}">${p.fg3a ? pct(p.fg3pct) : '<span class="dash">—</span>'}</td>`+
-      `<td class="${k('efg')}">${pct(p.efg)}</td>`;
+      `<td class="player${k('name')}"><span class="player-name">${esc(p.name)}</span></td>`+
+      `<td class="${k('games')}" style="${heat(p.games, ranges.games)}">${p.games.toLocaleString()}</td>`+
+      `<td class="${k('ppg')}" style="${heat(p.ppg, ranges.ppg)}">${dec(p.ppg,1)}</td>`+
+      `<td class="${k('pts')}" style="${heat(p.pts, ranges.pts)}">${p.pts.toLocaleString()}</td>`+
+      `<td class="${k('fga')}" style="${heat(p.fga, ranges.fga)}">${p.fga.toLocaleString()}</td>`+
+      `<td class="${k('fgpct')}" style="${heat(p.fgpct, ranges.fgpct)}">${pct(p.fgpct)}</td>`+
+      `<td class="${k('fg3pct')}" style="${p.fg3a ? heat(p.fg3pct, ranges.fg3pct) : ''}">${p.fg3a ? pct(p.fg3pct) : '<span class="dash">—</span>'}</td>`+
+      `<td class="${k('efg')}" style="${heat(p.efg, ranges.efg)}">${pct(p.efg)}</td>`;
     body.appendChild(tr);
   });
 
-  // Mobile cards
+  // Mobile cards (also use the gradient — same per-column ranges)
   const cards = document.getElementById("cards"); cards.innerHTML = "";
-  agg.slice(0, 250).forEach((p, i) => {
+  agg.forEach((p, i) => {
     const div = document.createElement("div"); div.className = "card";
     div.innerHTML =
       `<div class="card-rank">#${i+1}</div>`+
-      `<div class="card-head"><div class="nm">${esc(p.name)}</div><div class="ou">${esc(p.team)}</div></div>`+
+      `<div class="card-head"><div class="nm">${esc(p.name)}</div></div>`+
       `<div class="card-stats">`+
-        `<div><span class="lbl">GP</span><span class="val">${p.games.toLocaleString()}</span></div>`+
-        `<div><span class="lbl">PPG</span><span class="val">${dec(p.ppg,1)}</span></div>`+
-        `<div><span class="lbl">PTS</span><span class="val">${p.pts.toLocaleString()}</span></div>`+
-        `<div><span class="lbl">FGA</span><span class="val">${p.fga.toLocaleString()}</span></div>`+
-        `<div><span class="lbl">FG%</span><span class="val">${pct(p.fgpct)}</span></div>`+
-        `<div><span class="lbl">3P%</span><span class="val">${p.fg3a ? pct(p.fg3pct) : '—'}</span></div>`+
-        `<div><span class="lbl">eFG%</span><span class="val">${pct(p.efg)}</span></div>`+
+        `<div><span class="lbl">GP</span><span class="val" style="${heat(p.games, ranges.games)}">${p.games.toLocaleString()}</span></div>`+
+        `<div><span class="lbl">PPG</span><span class="val" style="${heat(p.ppg, ranges.ppg)}">${dec(p.ppg,1)}</span></div>`+
+        `<div><span class="lbl">PTS</span><span class="val" style="${heat(p.pts, ranges.pts)}">${p.pts.toLocaleString()}</span></div>`+
+        `<div><span class="lbl">FGA</span><span class="val" style="${heat(p.fga, ranges.fga)}">${p.fga.toLocaleString()}</span></div>`+
+        `<div><span class="lbl">FG%</span><span class="val" style="${heat(p.fgpct, ranges.fgpct)}">${pct(p.fgpct)}</span></div>`+
+        `<div><span class="lbl">3P%</span><span class="val" style="${p.fg3a ? heat(p.fg3pct, ranges.fg3pct) : ''}">${p.fg3a ? pct(p.fg3pct) : '—'}</span></div>`+
+        `<div><span class="lbl">eFG%</span><span class="val" style="${heat(p.efg, ranges.efg)}">${pct(p.efg)}</span></div>`+
       `</div>`;
     cards.appendChild(div);
   });
 }
 function k(key) { return key === state.sortKey ? " sorted-by" : ""; }
+
+// Per-column heat coloring: maps a value within [min,max] to a hue 0 (red,
+// low) -> 120 (green, high), with a desaturated pastel L=88 lightness so it
+// reads as a subtle wash rather than a yelling stoplight. If the column has
+// no spread (min==max), no color is applied.
+function heat(value, range) {
+  if (!range || range.max === range.min || value == null || isNaN(value)) return '';
+  const t = Math.max(0, Math.min(1, (value - range.min) / (range.max - range.min)));
+  const hue = 120 * t;   // 0 red, 120 green
+  return `background-color:hsl(${hue.toFixed(0)},65%,88%)`;
+}
 
 // boot
 load().catch(err => {
