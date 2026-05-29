@@ -220,9 +220,9 @@
     </div>
 
     <div>
-      <div class="head mb-2">MIN. CLUTCH FGA (career, within filter)</div>
+      <div class="head mb-2">MIN. CLUTCH FGA (auto-adjusts per window)</div>
       <div class="flex items-center gap-3">
-        <input type="number" id="min-fga" class="num-input" value="100" min="0" step="10" />
+        <input type="number" id="min-fga" class="num-input" value="200" min="0" step="10" />
         <span class="text-xs text-[color:var(--ink-mute)]">attempts</span>
       </div>
     </div>
@@ -307,14 +307,16 @@ const state = {
   window: "w5",       // w5 | w1 | w10s
   seasonFrom: null,
   seasonTo: null,
-  minFga: 100,
+  minFga: 200,
   sortKey: "ppg",
   sortDir: -1,        // -1 = desc
 };
 
 // Auto-adapt min FGA defaults per window. Tighter windows have far fewer reps,
-// so a 100-FGA gate empties them. The user can still override the input.
-const MIN_FGA_DEFAULTS = { w5: 100, w1: 30, w10s: 5 };
+// so a 200-FGA gate empties them. But the thresholds also need to be high
+// enough that the leaderboard reads like real all-time lore, not rookies with
+// 4 attempts. The user can still override the input.
+const MIN_FGA_DEFAULTS = { w5: 200, w1: 100, w10s: 25 };
 const WINDOW_LABELS    = { w5: "Last 5:00", w1: "Last 1:00", w10s: "Last 0:10" };
 
 async function load() {
