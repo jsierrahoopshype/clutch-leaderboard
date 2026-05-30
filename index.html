@@ -85,6 +85,10 @@ table.lb td.sorted-by{background:rgba(59,130,246,.05)}
 td.rank{color:var(--text-secondary);font-size:.78rem;width:2.4rem}
 table.lb td.player{text-align:left;font-family:'DM Sans',sans-serif;max-width:18rem}
 .player-name{font-weight:600;color:var(--text);display:inline-flex;align-items:center;gap:.45rem}
+.player-name a{color:inherit;text-decoration:none}
+.player-name a:hover{color:var(--accent);text-decoration:underline}
+.card-head .nm a{color:inherit;text-decoration:none}
+.card-head .nm a:hover{color:var(--accent)}
 .flag-img{width:18px;height:13px;border-radius:2px;box-shadow:0 0 0 .5px rgba(0,0,0,.18);flex-shrink:0;vertical-align:middle}
 .cc{font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--text-secondary);text-transform:uppercase}
 .player-team{font-size:.7rem;color:var(--text-secondary);font-family:'JetBrains Mono',monospace;
@@ -229,12 +233,14 @@ table.lb td.player{text-align:left;font-family:'DM Sans',sans-serif;max-width:18
 <script>
 const DATA_PATH = "clutch_splits.csv.gz";
 const META_PATH = "player_meta.json";
+const SLUGS_PATH = "player_slugs.json";
 
 const state = {
   rows: [],
   teamRows: [],
   seasons: [],
   meta: {},           // slug -> {country, iso, pos}
+  slugs: {},          // player_id -> url-slug
   phase: "ALL",
   pos: "ALL",         // ALL | G | F | C
   window: "w5",
@@ -285,22 +291,26 @@ const COLS = [
 
 // ----------- data load -----------
 async function load() {
-  const [splitsResp, metaResp] = await Promise.all([
+  const [splitsResp, metaResp, slugsResp] = await Promise.all([
     fetch(DATA_PATH),
     fetch(META_PATH).catch(() => null),
+    fetch(SLUGS_PATH).catch(() => null),
   ]);
   if (!splitsResp.ok) throw new Error("data fetch failed: " + splitsResp.status);
   const buf = new Uint8Array(await splitsResp.arrayBuffer());
   const text = pako.inflate(buf, { to: "string" });
   parseCsv(text);
   if (metaResp && metaResp.ok) {
-    try {
-      state.meta = await metaResp.json();
-    } catch (e) {
-      console.warn("player_meta.json parse failed:", e);
-    }
+    try { state.meta = await metaResp.json(); }
+    catch (e) { console.warn("player_meta.json parse failed:", e); }
   } else {
     console.warn("player_meta.json missing — flags + position filter disabled");
+  }
+  if (slugsResp && slugsResp.ok) {
+    try { state.slugs = await slugsResp.json(); }
+    catch (e) { console.warn("player_slugs.json parse failed:", e); }
+  } else {
+    console.warn("player_slugs.json missing — player names will not be clickable");
   }
   // Diagnostic: report clutch players with >=100 FGA in any window who didn't
   // find a meta match. Useful for catching name normalization gaps.
@@ -491,6 +501,7 @@ function aggregate() {
     }
     out.push({
       playerId: p.playerId,
+      slug: state.slugs[p.playerId] || "",
       name: p.name,
       team: p.team,
       games: p.games,
@@ -526,6 +537,12 @@ function flagOrCode(p) {
   }
   if (p.country) return `<span class="cc" title="${esc(p.country)}">${esc(p.country.slice(0,3).toUpperCase())}</span>`;
   return '';
+}
+
+// Player name with a link to their pre-rendered page, when the slug exists.
+function nameWithLink(p) {
+  if (p.slug) return `<a href="p/${p.slug}.html">${esc(p.name)}</a>`;
+  return esc(p.name);
 }
 
 // ----------- render -----------
@@ -578,7 +595,7 @@ function render() {
     const tr = document.createElement("tr");
     tr.innerHTML =
       `<td class="rank">${i+1}</td>`+
-      `<td class="player${k('name')}"><span class="player-name">${esc(p.name)}${flagOrCode(p)}</span></td>`+
+      `<td class="player${k('name')}"><span class="player-name">${nameWithLink(p)}${flagOrCode(p)}</span></td>`+
       `<td class="${k('games')}" style="${heat(p.games, ranges.games)}">${p.games.toLocaleString()}</td>`+
       `<td class="${k('ppg')}" style="${heat(p.ppg, ranges.ppg)}">${dec(p.ppg,1)}</td>`+
       `<td class="${k('pts')}" style="${heat(p.pts, ranges.pts)}">${p.pts.toLocaleString()}</td>`+
@@ -595,7 +612,7 @@ function render() {
     const div = document.createElement("div"); div.className = "card";
     div.innerHTML =
       `<div class="card-rank">#${i+1}</div>`+
-      `<div class="card-head"><div class="nm">${esc(p.name)}${flagOrCode(p)}</div></div>`+
+      `<div class="card-head"><div class="nm">${nameWithLink(p)}${flagOrCode(p)}</div></div>`+
       `<div class="card-stats">`+
         `<div><span class="lbl">GP</span><span class="val" style="${heat(p.games, ranges.games)}">${p.games.toLocaleString()}</span></div>`+
         `<div><span class="lbl">PPG</span><span class="val" style="${heat(p.ppg, ranges.ppg)}">${dec(p.ppg,1)}</span></div>`+
