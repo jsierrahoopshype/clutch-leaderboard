@@ -36,7 +36,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* filter bar */
 .filters{position:sticky;top:0;z-index:100;background:var(--bg);padding:.6rem 0 .9rem;
   margin-bottom:.5rem;border-bottom:1px solid var(--border)}
-.filter-row{display:grid;grid-template-columns:1.2fr 1.2fr 1.5fr .8fr auto;gap:.6rem;align-items:end}
+.filter-row{display:grid;grid-template-columns:1.2fr 1fr 1fr 1.4fr .8fr auto;gap:.6rem;align-items:end}
 .filter-group{display:flex;flex-direction:column;gap:.3rem;min-width:0}
 .filter-group label{font-size:.62rem;color:var(--text-secondary);text-transform:uppercase;
   letter-spacing:.06em;font-weight:600}
@@ -84,7 +84,9 @@ table.lb td{padding:.55rem .6rem;text-align:center;font-family:'JetBrains Mono',
 table.lb td.sorted-by{background:rgba(59,130,246,.05)}
 td.rank{color:var(--text-secondary);font-size:.78rem;width:2.4rem}
 table.lb td.player{text-align:left;font-family:'DM Sans',sans-serif;max-width:18rem}
-.player-name{font-weight:600;color:var(--text)}
+.player-name{font-weight:600;color:var(--text);display:inline-flex;align-items:center;gap:.45rem}
+.flag-img{width:18px;height:13px;border-radius:2px;box-shadow:0 0 0 .5px rgba(0,0,0,.18);flex-shrink:0;vertical-align:middle}
+.cc{font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--text-secondary);text-transform:uppercase}
 .player-team{font-size:.7rem;color:var(--text-secondary);font-family:'JetBrains Mono',monospace;
   margin-left:.5rem;text-transform:uppercase;letter-spacing:.04em}
 .dash{color:var(--text-secondary)}
@@ -163,6 +165,15 @@ table.lb td.player{text-align:left;font-family:'DM Sans',sans-serif;max-width:18
         </div>
       </div>
       <div class="filter-group">
+        <label>Position</label>
+        <div class="pill-row" id="pos-pills">
+          <button class="pill on" data-pos="ALL">All</button>
+          <button class="pill" data-pos="G">G</button>
+          <button class="pill" data-pos="F">F</button>
+          <button class="pill" data-pos="C">C</button>
+        </div>
+      </div>
+      <div class="filter-group">
         <label>Seasons</label>
         <div class="season-range">
           <select id="fFrom"></select>
@@ -217,12 +228,15 @@ table.lb td.player{text-align:left;font-family:'DM Sans',sans-serif;max-width:18
 
 <script>
 const DATA_PATH = "clutch_splits.csv.gz";
+const META_PATH = "player_meta.json";
 
 const state = {
   rows: [],
   teamRows: [],
   seasons: [],
+  meta: {},           // slug -> {country, iso, pos}
   phase: "ALL",
+  pos: "ALL",         // ALL | G | F | C
   window: "w5",
   seasonFromIdx: 0,
   seasonToIdx: 0,
@@ -230,6 +244,21 @@ const state = {
   sortKey: "ppg",
   sortDir: "desc",
 };
+
+// Normalize a player name to the join key used in player_meta.json.
+// Lowercase, strip accents, strip punctuation, collapse spaces.
+function toSlug(s) {
+  if (!s) return "";
+  // Strip accents via NFD + strip combining marks
+  s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  s = s.replace(/[^a-zA-Z\s]/g, " ").toLowerCase();
+  s = s.replace(/\s+/g, " ").trim();
+  return s;
+}
+
+function metaForName(name) {
+  return state.meta[toSlug(name)] || null;
+}
 
 const MIN_FGA_DEFAULTS = { w5: 200, w1: 100, w10s: 25 };
 const WINDOW_LABELS    = { w5: "Last 5:00", w1: "Last 1:00", w10s: "Last 0:10" };
@@ -248,11 +277,39 @@ const COLS = [
 
 // ----------- data load -----------
 async function load() {
-  const r = await fetch(DATA_PATH);
-  if (!r.ok) throw new Error("data fetch failed: " + r.status);
-  const buf = new Uint8Array(await r.arrayBuffer());
+  const [splitsResp, metaResp] = await Promise.all([
+    fetch(DATA_PATH),
+    fetch(META_PATH).catch(() => null),
+  ]);
+  if (!splitsResp.ok) throw new Error("data fetch failed: " + splitsResp.status);
+  const buf = new Uint8Array(await splitsResp.arrayBuffer());
   const text = pako.inflate(buf, { to: "string" });
   parseCsv(text);
+  if (metaResp && metaResp.ok) {
+    try {
+      state.meta = await metaResp.json();
+    } catch (e) {
+      console.warn("player_meta.json parse failed:", e);
+    }
+  } else {
+    console.warn("player_meta.json missing — flags + position filter disabled");
+  }
+  // Diagnostic: report clutch players with >=100 FGA in any window who didn't
+  // find a meta match. Useful for catching name normalization gaps.
+  const sumByPlayer = new Map();
+  for (const r of state.rows) {
+    if (r.window !== "w5") continue;
+    const k = r.playerId;
+    sumByPlayer.set(k, (sumByPlayer.get(k) || { name: r.name, fga: 0 }));
+    const v = sumByPlayer.get(k); v.fga += r.fga; v.name = v.name || r.name;
+  }
+  const misses = [];
+  for (const v of sumByPlayer.values()) {
+    if (v.fga >= 100 && !metaForName(v.name)) misses.push(`${v.name} (${v.fga} FGA)`);
+  }
+  if (misses.length) {
+    console.warn(`${misses.length} qualifying clutch players have no nationality match:`, misses.slice(0, 30));
+  }
   initControls();
   render();
 }
@@ -353,6 +410,16 @@ function initControls() {
     });
   });
 
+  // Position pills
+  document.querySelectorAll('#pos-pills .pill').forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll('#pos-pills .pill').forEach(b => b.classList.remove("on"));
+      btn.classList.add("on");
+      state.pos = btn.dataset.pos;
+      render();
+    });
+  });
+
   // Min FGA
   document.getElementById("min-fga").addEventListener("input", e => {
     state.minFga = +e.target.value || 0;
@@ -363,12 +430,14 @@ function initControls() {
   document.getElementById("reset").addEventListener("click", () => {
     state.window = "w5";
     state.phase = "ALL";
+    state.pos = "ALL";
     state.seasonFromIdx = 0;
     state.seasonToIdx = state.seasons.length - 1;
     state.minFga = MIN_FGA_DEFAULTS.w5;
     state.sortKey = "ppg"; state.sortDir = "desc";
     document.querySelectorAll('#window-pills .pill').forEach(b => b.classList.toggle("on", b.dataset.window === "w5"));
     document.querySelectorAll('#phase-pills .pill').forEach(b => b.classList.toggle("on", b.dataset.phase === "ALL"));
+    document.querySelectorAll('#pos-pills .pill').forEach(b => b.classList.toggle("on", b.dataset.pos === "ALL"));
     fFrom.value = 0; fTo.value = state.seasons.length - 1;
     document.getElementById("min-fga").value = state.minFga;
     render();
@@ -406,6 +475,12 @@ function aggregate() {
   const out = [];
   for (const p of players.values()) {
     if (p.fga < state.minFga) continue;
+    const meta = metaForName(p.name);
+    // Position filter: ALL passes everyone; G/F/C requires a match.
+    // Players without meta are dropped under specific-position filters.
+    if (state.pos !== "ALL") {
+      if (!meta || meta.pos !== state.pos) continue;
+    }
     out.push({
       playerId: p.playerId,
       name: p.name,
@@ -417,6 +492,8 @@ function aggregate() {
       fgpct: p.fga ? p.fgm/p.fga : 0,
       fg3pct: p.fg3a ? p.fg3m/p.fg3a : 0,
       efg: p.fga ? (p.fgm + 0.5*p.fg3m)/p.fga : 0,
+      iso: meta && meta.iso || "",
+      country: meta && meta.country || "",
     });
   }
 
@@ -433,6 +510,15 @@ function aggregate() {
 function pct(x) { return (x * 100).toFixed(1) + "%"; }
 function dec(x, n) { return x.toFixed(n); }
 function esc(s) { return (s||"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+// Flag image (preferred) or small country-code label (fallback) or nothing.
+function flagOrCode(p) {
+  if (p.iso) {
+    return `<img class="flag-img" src="https://flagcdn.com/h20/${p.iso}.png" srcset="https://flagcdn.com/h40/${p.iso}.png 2x" alt="${esc(p.country)}" title="${esc(p.country)}" loading="lazy" width="18" height="13">`;
+  }
+  if (p.country) return `<span class="cc" title="${esc(p.country)}">${esc(p.country.slice(0,3).toUpperCase())}</span>`;
+  return '';
+}
 
 // ----------- render -----------
 function render() {
@@ -484,7 +570,7 @@ function render() {
     const tr = document.createElement("tr");
     tr.innerHTML =
       `<td class="rank">${i+1}</td>`+
-      `<td class="player${k('name')}"><span class="player-name">${esc(p.name)}</span></td>`+
+      `<td class="player${k('name')}"><span class="player-name">${flagOrCode(p)}${esc(p.name)}</span></td>`+
       `<td class="${k('games')}" style="${heat(p.games, ranges.games)}">${p.games.toLocaleString()}</td>`+
       `<td class="${k('ppg')}" style="${heat(p.ppg, ranges.ppg)}">${dec(p.ppg,1)}</td>`+
       `<td class="${k('pts')}" style="${heat(p.pts, ranges.pts)}">${p.pts.toLocaleString()}</td>`+
@@ -501,7 +587,7 @@ function render() {
     const div = document.createElement("div"); div.className = "card";
     div.innerHTML =
       `<div class="card-rank">#${i+1}</div>`+
-      `<div class="card-head"><div class="nm">${esc(p.name)}</div></div>`+
+      `<div class="card-head"><div class="nm">${flagOrCode(p)}${esc(p.name)}</div></div>`+
       `<div class="card-stats">`+
         `<div><span class="lbl">GP</span><span class="val" style="${heat(p.games, ranges.games)}">${p.games.toLocaleString()}</span></div>`+
         `<div><span class="lbl">PPG</span><span class="val" style="${heat(p.ppg, ranges.ppg)}">${dec(p.ppg,1)}</span></div>`+
@@ -517,14 +603,13 @@ function render() {
 function k(key) { return key === state.sortKey ? " sorted-by" : ""; }
 
 // Per-column heat coloring: maps a value within [min,max] to a hue 0 (red,
-// low) -> 120 (green, high), with a desaturated pastel L=88 lightness so it
-// reads as a subtle wash rather than a yelling stoplight. If the column has
-// no spread (min==max), no color is applied.
+// low) -> 120 (green, high). L=78 gives a satisfyingly saturated wash without
+// drowning the text. If the column has no spread (min==max), no color.
 function heat(value, range) {
   if (!range || range.max === range.min || value == null || isNaN(value)) return '';
   const t = Math.max(0, Math.min(1, (value - range.min) / (range.max - range.min)));
   const hue = 120 * t;   // 0 red, 120 green
-  return `background-color:hsl(${hue.toFixed(0)},65%,88%)`;
+  return `background-color:hsl(${hue.toFixed(0)},70%,78%)`;
 }
 
 // boot
