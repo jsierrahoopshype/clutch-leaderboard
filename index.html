@@ -37,7 +37,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* filter bar */
 .filters{position:sticky;top:0;z-index:100;background:var(--bg);padding:.6rem 0 .9rem;
   margin-bottom:.5rem;border-bottom:1px solid var(--border)}
-.filter-row{display:grid;grid-template-columns:1.2fr .9fr .9fr 1.3fr 1fr .8fr auto;gap:.6rem;align-items:end}
+.filter-row{display:grid;grid-template-columns:1.1fr .8fr .8fr 1.2fr .9fr .9fr .7fr auto;gap:.5rem;align-items:end}
 .filter-group{display:flex;flex-direction:column;gap:.3rem;min-width:0}
 .filter-group label{font-size:.62rem;color:var(--text-secondary);text-transform:uppercase;
   letter-spacing:.06em;font-weight:600}
@@ -189,6 +189,13 @@ table.lb td.player{text-align:left;font-family:'DM Sans',sans-serif;max-width:18
         </div>
       </div>
       <div class="filter-group">
+        <label>Rate</label>
+        <div class="pill-row" id="rate-pills">
+          <button class="pill on" data-rate="avg">Per game</button>
+          <button class="pill" data-rate="tot">Totals</button>
+        </div>
+      </div>
+      <div class="filter-group">
         <label>Stats</label>
         <div class="pill-row" id="cols-pills">
           <button class="pill on" data-cols="base">Basic</button>
@@ -231,6 +238,7 @@ table.lb td.player{text-align:left;font-family:'DM Sans',sans-serif;max-width:18
       <div>
         <div class="head">Advanced stats</div>
         <p><strong>TS%</strong> is points per shooting possession with free throws counted: PTS / (2 × (FGA + 0.44 × FTA)). <strong>rTS%</strong> and <strong>PAE</strong> are both measured against the players currently qualifying rather than a fixed league average, so the bar moves as you change the window, era or minimum &mdash; PAE is the points a player scored above what an average qualifier would have managed on the same shooting possessions, which rewards volume and efficiency at once. <strong>TOV%</strong> is turnovers per possession used. <strong>LOAD%</strong> is the share of its own team's clutch possessions a player used, in the same games and window; it is <em>not</em> usage rate, which needs on-court time this play-by-play does not carry, and it is left blank when any of a player's seasons has no matching team row.</p>
+        <p style="margin-top:.5rem"><strong>Per game / Totals</strong> switches the counting stats between summed and divided by clutch games; percentages are unaffected. The minimum FGA filter always applies to the total, so the qualifying field does not change underneath you when you switch.</p>
         <p style="margin-top:.5rem">Still to come: true usage from on-court reconstruction, Q4 and OT split apart, and opponent-defense filtering.</p>
       </div>
     </div>
@@ -260,6 +268,7 @@ const state = {
   seasonToIdx: 0,
   minFga: 200,
   cols: "base",       // base | adv | all
+  rate: "avg",        // avg | tot  — counting stats per game, or summed
   sortKey: "ppg",
   sortDir: "desc",
 };
@@ -305,13 +314,28 @@ const COLS = [
    html:p=>`<span class="player-name">${nameWithLink(p)}${flagOrCode(p)}</span>`},
   {key:'games', label:'GP',   sortable:true, type:'num', def:'desc', grp:'always', heat:1,
    fmt:p=>p.games.toLocaleString(), tip:'Clutch games — games with at least one event in this window'},
+  /* Counting stats come in pairs: one summed, one per clutch game. Only the
+     half matching the Rate pill is shown, and `pair` lets a sort survive the
+     switch — sorted on total points, then flipped to per game, the table sorts
+     on PPG rather than throwing the ordering away. Percentages have no pair
+     because they read the same either way. */
   {key:'pts',   label:'PTS',  sortable:true, type:'num', def:'desc', grp:'always', heat:1,
-   fmt:p=>p.pts.toLocaleString(), tip:'Total clutch points'},
+   mode:'tot', pair:'ppg', fmt:p=>p.pts.toLocaleString(), tip:'Total clutch points'},
+  {key:'ppg',   label:'PPG',  sortable:true, type:'num', def:'desc', grp:'always', heat:1,
+   mode:'avg', pair:'pts', fmt:p=>dec(p.ppg,1), tip:'Clutch points per clutch game'},
 
-  {key:'ppg',   label:'PPG',  sortable:true, type:'num', def:'desc', grp:'base', heat:1,
-   fmt:p=>dec(p.ppg,1), tip:'Clutch points per clutch game'},
   {key:'fga',   label:'FGA',  sortable:true, type:'num', def:'desc', grp:'base', heat:1,
-   fmt:p=>p.fga.toLocaleString(), tip:'Clutch field goal attempts'},
+   mode:'tot', pair:'fgapg', fmt:p=>p.fga.toLocaleString(), tip:'Clutch field goal attempts'},
+  {key:'fgapg', label:'FGA/G',sortable:true, type:'num', def:'desc', grp:'base', heat:1,
+   mode:'avg', pair:'fga', fmt:p=>dec(p.fgapg,1), tip:'Clutch field goal attempts per clutch game'},
+  {key:'fgm',   label:'FGM',  sortable:true, type:'num', def:'desc', grp:'base', heat:1,
+   mode:'tot', pair:'fgmpg', fmt:p=>p.fgm.toLocaleString(), tip:'Clutch field goals made'},
+  {key:'fgmpg', label:'FGM/G',sortable:true, type:'num', def:'desc', grp:'base', heat:1,
+   mode:'avg', pair:'fgm', fmt:p=>dec(p.fgmpg,1), tip:'Clutch field goals made per clutch game'},
+  {key:'fg3m',  label:'3PM',  sortable:true, type:'num', def:'desc', grp:'base', heat:1,
+   mode:'tot', pair:'fg3mpg', fmt:p=>p.fg3m.toLocaleString(), tip:'Clutch threes made'},
+  {key:'fg3mpg',label:'3PM/G',sortable:true, type:'num', def:'desc', grp:'base', heat:1,
+   mode:'avg', pair:'fg3m', fmt:p=>dec(p.fg3mpg,2), tip:'Clutch threes made per clutch game'},
   {key:'fgpct', label:'FG%',  sortable:true, type:'num', def:'desc', grp:'base', heat:1,
    fmt:p=>pct(p.fgpct)},
   {key:'fg3pct',label:'3P%',  sortable:true, type:'num', def:'desc', grp:'base', heat:1,
@@ -326,8 +350,15 @@ const COLS = [
    fmt:p=>sgn(p.rts*100,1)+'%',
    tip:'True shooting against the average of everyone currently qualifying — recomputed as you filter'},
   {key:'pae',   label:'PAE',  sortable:true, type:'num', def:'desc', grp:'adv', heat:1,
-   fmt:p=>sgn(p.pae,0),
+   mode:'tot', pair:'paepg', fmt:p=>sgn(p.pae,0),
    tip:'Points above expectation — points scored, less what an average qualifier would have scored on the same shooting possessions. Rewards volume and efficiency together'},
+  {key:'paepg', label:'PAE/G',sortable:true, type:'num', def:'desc', grp:'adv', heat:1,
+   mode:'avg', pair:'pae', fmt:p=>sgn(p.paepg,2),
+   tip:'Points above expectation per clutch game — the same measure, with career length taken out of it'},
+  {key:'tov',   label:'TOV',  sortable:true, type:'num', def:'asc', grp:'adv', heat:1, inv:1,
+   mode:'tot', pair:'tovpg', fmt:p=>p.tov.toLocaleString(), tip:'Clutch turnovers'},
+  {key:'tovpg', label:'TOV/G',sortable:true, type:'num', def:'asc', grp:'adv', heat:1, inv:1,
+   mode:'avg', pair:'tov', fmt:p=>dec(p.tovpg,2), tip:'Clutch turnovers per clutch game'},
   {key:'ftpct', label:'FT%',  sortable:true, type:'num', def:'desc', grp:'adv', heat:1,
    fmt:p=>p.fta?pct(p.ftpct):null, tip:'Clutch free throw percentage'},
   {key:'ftr',   label:'FTr',  sortable:true, type:'num', def:'desc', grp:'adv', heat:1,
@@ -343,7 +374,8 @@ const COLS = [
 ];
 
 const shownCols = () => COLS.filter(c =>
-  c.grp === 'always' || state.cols === 'all' || c.grp === state.cols);
+  (c.grp === 'always' || state.cols === 'all' || c.grp === state.cols) &&
+  (!c.mode || c.mode === state.rate));
 
 // signed, for the columns where the sign is the point
 function sgn(x, n){ return (x >= 0 ? '+' : '\u2212') + Math.abs(x).toFixed(n); }
@@ -497,6 +529,23 @@ function initControls() {
     });
   });
 
+  // Per game / totals
+  document.querySelectorAll('#rate-pills .pill').forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll('#rate-pills .pill').forEach(b => b.classList.remove("on"));
+      btn.classList.add("on");
+      state.rate = btn.dataset.rate;
+      // carry the sort across to the other half of the pair
+      const cur = COLS.find(c => c.key === state.sortKey);
+      if (cur && cur.pair && cur.mode !== state.rate) state.sortKey = cur.pair;
+      if (!shownCols().some(c => c.key === state.sortKey)) {
+        state.sortKey = state.rate === 'tot' ? 'pts' : 'ppg';
+        state.sortDir = 'desc';
+      }
+      render();
+    });
+  });
+
   // Column set
   document.querySelectorAll('#cols-pills .pill').forEach(btn => {
     btn.addEventListener("click", () => {
@@ -505,7 +554,7 @@ function initControls() {
       state.cols = btn.dataset.cols;
       // sorted on a column that just left the table — fall back to something visible
       if (!shownCols().some(c => c.key === state.sortKey)) {
-        state.sortKey = state.cols === 'adv' ? 'ts' : 'ppg';
+        state.sortKey = state.cols === 'adv' ? 'ts' : (state.rate === 'tot' ? 'pts' : 'ppg');
         state.sortDir = 'desc';
       }
       render();
@@ -527,8 +576,10 @@ function initControls() {
     state.seasonToIdx = state.seasons.length - 1;
     state.minFga = MIN_FGA_DEFAULTS.w5;
     state.cols = "base";
+    state.rate = "avg";
     state.sortKey = "ppg"; state.sortDir = "desc";
     document.querySelectorAll('#cols-pills .pill').forEach(b => b.classList.toggle("on", b.dataset.cols === "base"));
+    document.querySelectorAll('#rate-pills .pill').forEach(b => b.classList.toggle("on", b.dataset.rate === "avg"));
     document.querySelectorAll('#window-pills .pill').forEach(b => b.classList.toggle("on", b.dataset.window === "w5"));
     document.querySelectorAll('#phase-pills .pill').forEach(b => b.classList.toggle("on", b.dataset.phase === "ALL"));
     document.querySelectorAll('#pos-pills .pill').forEach(b => b.classList.toggle("on", b.dataset.pos === "ALL"));
@@ -604,6 +655,10 @@ function aggregate() {
       tsa: p.fga + 0.44*p.fta,                    // shooting possessions
       ts:  (p.fga + 0.44*p.fta) ? p.pts / (2*(p.fga + 0.44*p.fta)) : 0,
       ftpct: p.fta ? p.ftm/p.fta : 0,
+      fgapg: p.games ? p.fga/p.games : 0,
+      fgmpg: p.games ? p.fgm/p.games : 0,
+      fg3mpg: p.games ? p.fg3m/p.games : 0,
+      tovpg: p.games ? p.tov/p.games : 0,
       ftr: p.fga ? p.fta/p.fga : 0,
       par3: p.fga ? p.fg3a/p.fga : 0,
       tovpct: (p.fga + 0.44*p.fta + p.tov) ? p.tov/(p.fga + 0.44*p.fta + p.tov) : 0,
@@ -627,6 +682,7 @@ function aggregate() {
   out.forEach(p => {
     p.rts = p.ts - poolTs;
     p.pae = p.pts - poolTs * 2 * p.tsa;
+    p.paepg = p.games ? p.pae / p.games : 0;
   });
   out.poolTs = poolTs;
 
@@ -668,6 +724,7 @@ function render() {
   // Summary
   document.getElementById("summary").innerHTML =
     `<strong>${agg.length.toLocaleString()}</strong> qualifying players · ${WINDOW_LABELS[state.window]} · ${state.phase === "ALL" ? "RS + Playoffs" : (state.phase === "RS" ? "Regular Season" : "Playoffs only")}` +
+    ` · ${state.rate === 'tot' ? 'totals' : 'per clutch game'}` +
     (agg.length ? ` · pool TS% <strong>${pct(agg.poolTs)}</strong>` : '');
 
   // Head
